@@ -1,0 +1,1903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finance Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --bg: #F4F6FB; --surface: #FFFFFF;
+            --primary: #2563EB; --primary-light: #EFF6FF; --primary-muted: #BFDBFE;
+            --text: #1E2532; --text-sub: #4B5563; --muted: #9CA3AF;
+            --success: #059669; --success-bg: #ECFDF5;
+            --danger: #DC2626; --danger-bg: #FEF2F2;
+            --border: #E5E9F2;
+            --radius-sm: 10px; --radius: 14px; --radius-lg: 20px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.07); --shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'DM Sans', sans-serif; background: #DDE3EF; color: var(--text); -webkit-font-smoothing: antialiased; }
+
+        /* ── Auth & Verify Screens ── */
+        .auth-screen {
+            position: fixed; inset: 0; background: #DDE3EF; z-index: 1000;
+            display: none; align-items: center; justify-content: center; padding: 24px 20px;
+        }
+        .auth-screen.visible { display: flex; }
+        .auth-card {
+            background: var(--surface); border-radius: var(--radius-lg);
+            padding: 28px 24px 24px; width: 100%; max-width: 400px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+        }
+        .auth-logo {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 22px;
+        }
+        .auth-logo-icon {
+            width: 40px; height: 40px; background: var(--primary);
+            border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white;
+        }
+        .auth-logo-name { font-size: 1.1rem; font-weight: 700; color: var(--text); }
+        .auth-logo-sub  { font-size: 0.7rem; color: var(--muted); margin-top: 1px; }
+
+        .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; background: var(--border); border-radius: var(--radius-sm); padding: 3px; gap: 3px; margin-bottom: 20px; }
+        .auth-tab { padding: 9px; border: none; border-radius: 8px; font-family: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: transparent; color: var(--muted); transition: all 0.15s; }
+        .auth-tab.active { background: var(--surface); color: var(--primary); box-shadow: var(--shadow-sm); }
+
+        .auth-error { font-size: 0.78rem; color: var(--danger); min-height: 18px; margin-bottom: 8px; font-weight: 500; }
+
+        .verify-card {
+            background: var(--surface); border-radius: var(--radius-lg);
+            padding: 32px 24px; width: 100%; max-width: 400px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.10); text-align: center;
+        }
+        .verify-icon {
+            width: 64px; height: 64px; background: var(--primary-light);
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            color: var(--primary); margin: 0 auto 18px;
+        }
+        .verify-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 10px; }
+        .verify-body  { font-size: 0.85rem; color: var(--text-sub); line-height: 1.6; margin-bottom: 20px; }
+
+        /* ── App Shell ── */
+        .app-shell { max-width: 430px; margin: 0 auto; background: var(--bg); min-height: 100vh; position: relative; padding-bottom: 80px; }
+        .view { display: none; padding: 20px 18px; }
+        .view.active { display: block; }
+
+        /* ── Unclaimed Banner ── */
+        .unclaimed-banner {
+            margin: 16px 18px 0; background: var(--primary-light);
+            border: 1px solid var(--primary-muted); border-radius: var(--radius);
+            padding: 13px 14px; display: none; gap: 12px; align-items: flex-start;
+        }
+        .unclaimed-banner.show { display: flex; }
+        .unclaimed-icon { color: var(--primary); flex-shrink: 0; margin-top: 2px; }
+        .unclaimed-title { font-size: 0.82rem; font-weight: 700; color: var(--primary); margin-bottom: 3px; }
+        .unclaimed-detail { font-size: 0.75rem; color: var(--text-sub); line-height: 1.45; margin-bottom: 8px; }
+        .btn-claim {
+            padding: 8px 14px; background: var(--primary); color: white;
+            border: none; border-radius: 8px; font-family: inherit; font-size: 0.8rem;
+            font-weight: 700; cursor: pointer; transition: opacity 0.15s;
+        }
+        .btn-claim:hover { opacity: 0.9; }
+        .btn-dismiss-claim {
+            background: none; border: none; color: var(--muted); font-size: 0.75rem;
+            font-family: inherit; cursor: pointer; margin-top: 4px; font-weight: 600;
+        }
+
+        /* ── Page Header ── */
+        .page-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 18px 0; }
+        .page-title { font-size: 1.15rem; font-weight: 700; color: var(--text); }
+        .page-subtitle { font-size: 0.75rem; color: var(--muted); margin-top: 1px; }
+
+        /* ── Balance Card ── */
+        .balance-card { background: var(--primary); margin: 16px 18px 0; border-radius: var(--radius-lg); padding: 22px 22px 20px; color: white; position: relative; overflow: hidden; }
+        .balance-card::before { content: ''; position: absolute; top: -30px; right: -30px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.08); }
+        .balance-card::after  { content: ''; position: absolute; bottom: -40px; right: 40px; width: 90px; height: 90px; border-radius: 50%; background: rgba(255,255,255,0.05); }
+        .balance-label  { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; opacity: 0.75; margin-bottom: 6px; }
+        .balance-amount { font-size: 2.1rem; font-weight: 700; letter-spacing: -0.5px; position: relative; z-index: 1; }
+        .balance-period { font-size: 0.72rem; opacity: 0.65; margin-top: 4px; }
+
+        /* ── Filter Pills ── */
+        .filter-row { display: flex; gap: 7px; padding: 14px 18px 4px; overflow-x: auto; scrollbar-width: none; }
+        .filter-row::-webkit-scrollbar { display: none; }
+        .pill { background: var(--surface); color: var(--text-sub); padding: 7px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; border: 1px solid var(--border); cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+        .pill.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        /* ── Stat Row ── */
+        .stat-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 14px 18px 0; }
+        .stat-card { background: var(--surface); border-radius: var(--radius); padding: 14px 10px; border: 1px solid var(--border); text-align: center; }
+        .stat-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; }
+        .stat-icon.income-icon  { background: var(--success-bg); color: var(--success); }
+        .stat-icon.expense-icon { background: var(--danger-bg);  color: var(--danger);  }
+        .stat-icon.savings-icon { background: var(--primary-light); color: var(--primary); }
+        .stat-label { font-size: 0.62rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+        .stat-val { font-size: 0.82rem; font-weight: 700; }
+        .stat-val.positive { color: var(--success); } .stat-val.negative { color: var(--danger); } .stat-val.neutral { color: var(--primary); }
+
+        /* ── Section Head ── */
+        .section-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 18px 10px; }
+        .section-title { font-size: 0.9rem; font-weight: 700; color: var(--text); }
+        .section-link  { font-size: 0.75rem; color: var(--primary); font-weight: 600; cursor: pointer; }
+
+        /* ── Transaction Cards ── */
+        .tx-list { display: flex; flex-direction: column; gap: 8px; padding: 0 18px; }
+        .tx-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 13px 14px; display: flex; align-items: center; gap: 12px; box-shadow: var(--shadow-sm); }
+        .tx-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .tx-icon.income  { background: var(--success-bg); color: var(--success); }
+        .tx-icon.expense { background: var(--danger-bg);  color: var(--danger);  }
+        .tx-body  { flex: 1; min-width: 0; }
+        .tx-desc  { font-size: 0.875rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tx-meta  { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+        .tx-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+        .tx-amount { font-size: 0.875rem; font-weight: 700; }
+        .tx-amount.positive { color: var(--success); } .tx-amount.negative { color: var(--danger); }
+        .btn-edit { background: none; border: none; cursor: pointer; color: var(--muted); padding: 2px; display: flex; align-items: center; transition: color 0.15s; }
+        .btn-edit:hover { color: var(--primary); }
+
+        /* ── Quote Box ── */
+        .quote-box { margin: 16px 18px; background: var(--primary-light); border: 1px solid var(--primary-muted); border-radius: var(--radius); padding: 14px 16px; display: flex; gap: 12px; }
+        .quote-icon { color: var(--primary); flex-shrink: 0; margin-top: 2px; }
+        .quote-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--primary); margin-bottom: 4px; }
+        .quote-text { font-size: 0.82rem; color: var(--text); line-height: 1.5; font-style: italic; margin-bottom: 6px; }
+        .quote-link { font-size: 0.72rem; color: var(--primary); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 3px; }
+
+        /* ── Empty State ── */
+        .empty-state { text-align: center; padding: 28px 20px; color: var(--muted); font-size: 0.82rem; }
+        .empty-icon  { margin-bottom: 8px; opacity: 0.4; }
+
+        /* ── Toast ── */
+        .toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px); background: #1E2532; color: white; padding: 10px 18px; border-radius: 10px; font-size: 0.82rem; font-weight: 500; opacity: 0; transition: all 0.3s; z-index: 999; white-space: nowrap; pointer-events: none; }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.error { background: var(--danger); } .toast.success { background: var(--success); }
+
+        /* ── Account Cards ── */
+        .account-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 16px; display: flex; align-items: center; gap: 14px; box-shadow: var(--shadow-sm); }
+        .account-icon { width: 42px; height: 42px; background: var(--primary-light); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--primary); flex-shrink: 0; }
+        .account-name    { font-size: 0.9rem; font-weight: 600; margin-bottom: 2px; }
+        .account-balance { font-size: 0.78rem; color: var(--muted); }
+        .account-amount  { font-size: 1rem; font-weight: 700; margin-left: auto; }
+
+        /* ── Net Worth + Goal Grid ── */
+        .accounts-summary-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 0 18px;
+        }
+        .networth-card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 14px;
+            box-shadow: var(--shadow-sm);
+        }
+        .networth-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin-bottom: 4px; }
+        .networth-val { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 10px; }
+        .networth-val.positive { color: var(--success); } .networth-val.negative { color: var(--danger); }
+        .networth-stack { display: flex; flex-direction: column; gap: 4px; }
+        .networth-stack-item { display: flex; justify-content: space-between; align-items: center; }
+        .networth-stack-label { font-size: 0.65rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+        .networth-stack-val { font-size: 0.75rem; font-weight: 700; }
+        .networth-stack-val.assets { color: var(--success); } .networth-stack-val.liabs { color: var(--danger); }
+
+        /* ── Today's Goal Card ── */
+        .goal-card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 14px;
+            box-shadow: var(--shadow-sm); display: flex; flex-direction: column;
+        }
+        .goal-card-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin-bottom: 4px; }
+        .goal-card-amount { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.5px; color: var(--text); margin-bottom: 8px; }
+        .goal-progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+        .goal-progress-fill  { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.5s ease; }
+        .goal-progress-fill.complete { background: var(--success); }
+        .goal-earned    { font-size: 0.7rem; font-weight: 700; color: var(--success); margin-bottom: 2px; }
+        .goal-remaining { font-size: 0.7rem; color: var(--muted); }
+        .goal-not-set   { font-size: 0.75rem; color: var(--muted); font-style: italic; line-height: 1.4; margin-top: 4px; }
+
+        /* ── Accounts Section ── */
+        .accounts-section { padding: 18px 18px 0; }
+        .accounts-section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .accounts-section-title { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-sub); }
+
+        /* ── Liability Cards ── */
+        .liability-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 14px; display: flex; align-items: center; gap: 12px; box-shadow: var(--shadow-sm); }
+        .liability-num  { width: 26px; height: 26px; background: var(--danger-bg); color: var(--danger); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; flex-shrink: 0; }
+        .liability-name   { flex: 1; font-size: 0.875rem; font-weight: 600; }
+        .liability-amount { font-size: 0.875rem; font-weight: 700; color: var(--danger); flex-shrink: 0; }
+        .btn-delete { background: none; border: none; cursor: pointer; color: var(--muted); padding: 4px; display: flex; align-items: center; transition: color 0.15s; flex-shrink: 0; margin-left: 4px; }
+        .btn-delete:hover { color: var(--danger); }
+
+        /* ── Transfer ── */
+        .transfer-action-btn {
+            width: 100%; display: flex; align-items: center; gap: 12px;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 13px 16px;
+            font-family: inherit; cursor: pointer;
+            box-shadow: var(--shadow-sm); transition: background 0.12s;
+        }
+        .transfer-action-btn:hover { background: var(--bg); }
+        .transfer-action-icon { width: 36px; height: 36px; background: var(--primary-light); color: var(--primary); border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .transfer-action-label { flex: 1; text-align: left; }
+        .transfer-action-label strong { display: block; font-size: 0.875rem; font-weight: 600; color: var(--text); }
+        .transfer-action-label span   { font-size: 0.7rem; color: var(--muted); }
+        .tx-icon.transfer { background: var(--primary-light); color: var(--primary); }
+        .tx-amount.transfer-amt { color: var(--primary); }
+        .due-badge { font-size: 0.65rem; font-weight: 700; padding: 2px 7px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+        .due-badge.safe    { background: #F3F4F6; color: var(--muted); }
+        .due-badge.notice  { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
+        .due-badge.warning { background: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
+        .due-badge.urgent  { background: var(--danger-bg); color: var(--danger); border: 1px solid #FECACA; }
+        .due-badge.overdue { background: #450A0A; color: #FCA5A5; }
+
+        /* ── Due Alerts ── */
+        .due-alerts { display: flex; flex-direction: column; gap: 8px; margin: 14px 18px 0; }
+        .alert-notice  { border-radius: var(--radius); border: 1px solid #FDE68A; background: #FFFBEB; padding: 12px 14px; display: flex; gap: 10px; align-items: flex-start; }
+        .alert-warning { border-radius: var(--radius); border: 1px solid #FED7AA; background: #FFF7ED; padding: 13px 14px; display: flex; gap: 10px; align-items: flex-start; }
+        .alert-urgent  { border-radius: var(--radius); border: 2px solid #FECACA; background: var(--danger-bg); padding: 14px; display: flex; gap: 10px; align-items: flex-start; }
+        .alert-critical{ border-radius: var(--radius); border: 2px solid var(--danger); background: #450A0A; padding: 14px; display: flex; gap: 10px; align-items: flex-start; }
+        .alert-notice-icon   { color: #D97706; flex-shrink: 0; margin-top: 1px; }
+        .alert-warning-icon  { color: #EA580C; flex-shrink: 0; margin-top: 1px; }
+        .alert-urgent-icon   { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
+        .alert-critical-icon { color: #FCA5A5; flex-shrink: 0; margin-top: 1px; }
+        .alert-notice-title  { font-size: 0.8rem; font-weight: 700; color: #92400E; margin-bottom: 2px; }
+        .alert-warning-title { font-size: 0.82rem; font-weight: 700; color: #9A3412; margin-bottom: 3px; }
+        .alert-urgent-title  { font-size: 0.85rem; font-weight: 700; color: var(--danger); margin-bottom: 3px; }
+        .alert-critical-title{ font-size: 0.87rem; font-weight: 700; color: #FCA5A5; margin-bottom: 3px; }
+        .alert-notice-body   { font-size: 0.75rem; color: #78350F; line-height: 1.45; }
+        .alert-warning-body  { font-size: 0.76rem; color: #7C2D12; line-height: 1.5; }
+        .alert-urgent-body   { font-size: 0.77rem; color: #7F1D1D; line-height: 1.5; }
+        .alert-critical-body { font-size: 0.77rem; color: #FECACA; line-height: 1.5; }
+        .alert-detail { margin-top: 8px; border-radius: 8px; padding: 8px 10px; font-size: 0.75rem; line-height: 1.5; }
+        .alert-warning .alert-detail { background: rgba(255,255,255,0.6); color: #7C2D12; }
+        .alert-urgent  .alert-detail { background: rgba(255,255,255,0.65); color: #7F1D1D; }
+        .alert-critical .alert-detail { background: rgba(255,255,255,0.08); color: #FECACA; }
+        .alert-detail strong { display: block; font-weight: 700; margin-bottom: 2px; }
+
+        /* ── Add Liability Form ── */
+        .add-liability-panel { background: var(--primary-light); border: 1px solid var(--primary-muted); border-radius: var(--radius); padding: 14px; display: none; flex-direction: column; gap: 10px; }
+        .add-liability-panel.open { display: flex; }
+        .add-liability-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .control-sm { width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); font-family: inherit; font-size: 0.875rem; color: var(--text); outline: none; transition: border-color 0.15s; }
+        .control-sm:focus { border-color: var(--primary); }
+        .btn-add-liability { padding: 10px 16px; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); font-family: inherit; font-size: 0.85rem; font-weight: 700; cursor: pointer; }
+        .btn-toggle-add { display: flex; align-items: center; gap: 5px; background: none; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 0.78rem; font-weight: 600; color: var(--primary); cursor: pointer; transition: background 0.15s; width: 100%; justify-content: center; }
+        .btn-toggle-add:hover { background: var(--primary-light); }
+
+        /* ── Date Filter ── */
+        .date-row { padding: 0 18px 14px; }
+        .date-label { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .date-input { width: 100%; padding: 11px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-family: inherit; font-size: 0.875rem; color: var(--text); outline: none; }
+        .date-input:focus { border-color: var(--primary); }
+
+        /* ── Profile View ── */
+        .profile-user-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 18px 16px; display: flex; align-items: center; gap: 14px; box-shadow: var(--shadow-sm); }
+        .profile-avatar { width: 48px; height: 48px; background: var(--primary); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 700; flex-shrink: 0; }
+
+        /* ── Settings Views ── */
+        .settings-back-btn { background: none; border: none; cursor: pointer; color: var(--text-sub); display: flex; align-items: center; gap: 6px; font-family: inherit; font-size: 0.85rem; font-weight: 600; padding: 4px 0; }
+        .settings-back-btn:hover { color: var(--primary); }
+        .settings-item-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); overflow: hidden; }
+        .settings-item-row  { display: flex; align-items: center; gap: 12px; padding: 13px 14px; }
+        .settings-item-icon { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .settings-item-icon.blue  { background: var(--primary-light); color: var(--primary); }
+        .settings-item-icon.green { background: var(--success-bg); color: var(--success); }
+        .settings-item-body { flex: 1; min-width: 0; }
+        .settings-item-name { font-size: 0.875rem; font-weight: 600; }
+        .settings-item-sub  { font-size: 0.7rem; color: var(--muted); margin-top: 1px; }
+        .settings-inline-form { background: var(--primary-light); border: 1px solid var(--primary-muted); border-radius: var(--radius); padding: 14px; display: none; flex-direction: column; gap: 10px; }
+        .settings-inline-form.open { display: flex; }
+        .settings-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .settings-three-col { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; align-items: center; }
+        .btn-icon-edit   { background: none; border: none; cursor: pointer; color: var(--muted); padding: 5px; display: flex; align-items: center; border-radius: 6px; transition: all 0.12s; }
+        .btn-icon-edit:hover   { background: var(--primary-light); color: var(--primary); }
+        .btn-icon-delete { background: none; border: none; cursor: pointer; color: var(--muted); padding: 5px; display: flex; align-items: center; border-radius: 6px; transition: all 0.12s; }
+        .btn-icon-delete:hover { background: var(--danger-bg); color: var(--danger); }
+        .settings-edit-form { padding: 12px 14px; background: #F8FAFF; border-top: 1px solid var(--border); display: none; flex-direction: column; gap: 8px; }
+        .settings-edit-form.open { display: flex; }
+        .settings-edit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .btn-save-sm   { padding: 8px 14px; background: var(--primary); color: white; border: none; border-radius: 8px; font-family: inherit; font-size: 0.8rem; font-weight: 700; cursor: pointer; }
+        .btn-cancel-sm { padding: 8px 12px; background: none; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 0.8rem; font-weight: 600; color: var(--muted); cursor: pointer; }
+
+        /* ── Category Type Badges ── */
+        .cat-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+        .cat-badge.income  { background: var(--success-bg); color: var(--success); }
+        .cat-badge.expense { background: var(--danger-bg);  color: var(--danger);  }
+        .cat-badge.both    { background: var(--primary-light); color: var(--primary); }
+        .profile-name  { font-size: 0.95rem; font-weight: 700; margin-bottom: 2px; }
+        .profile-email { font-size: 0.75rem; color: var(--muted); }
+        .profile-section-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin: 18px 0 8px; }
+        .profile-action-row { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; box-shadow: var(--shadow-sm); }
+        .profile-action-btn { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: none; border: none; font-family: inherit; font-size: 0.875rem; font-weight: 600; color: var(--text); cursor: pointer; text-align: left; transition: background 0.12s; }
+        .profile-action-btn:hover { background: var(--bg); }
+        .profile-action-btn + .profile-action-btn { border-top: 1px solid var(--border); }
+        .profile-action-btn.danger { color: var(--danger); }
+        .profile-action-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .profile-action-icon.blue { background: var(--primary-light); color: var(--primary); }
+        .profile-action-icon.green { background: var(--success-bg); color: var(--success); }
+        .profile-action-icon.red { background: var(--danger-bg); color: var(--danger); }
+        .profile-action-label { flex: 1; }
+        .profile-action-label span { display: block; font-size: 0.68rem; color: var(--muted); font-weight: 400; margin-top: 1px; }
+        .profile-action-chevron { color: var(--muted); }
+
+        /* ── Bottom Nav ── */
+        .bottom-nav { position: fixed; bottom: 0; width: 100%; max-width: 430px; background: var(--surface); display: flex; justify-content: space-around; align-items: center; padding: 10px 0 14px; border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(0,0,0,0.06); z-index: 100; }
+        .nav-item { color: var(--muted); background: none; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 0.6rem; font-weight: 600; font-family: inherit; padding: 4px 12px; border-radius: 8px; transition: color 0.15s; }
+        .nav-item.active { color: var(--primary); }
+        .nav-add { background: var(--primary); width: 48px; height: 48px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; transform: translateY(-14px); box-shadow: 0 4px 14px rgba(37,99,235,0.4); border: 3px solid var(--bg); cursor: pointer; transition: transform 0.15s; }
+        .nav-add:hover { transform: translateY(-16px); }
+
+        /* ── Modal ── */
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 200; align-items: flex-end; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-sheet { background: var(--bg); width: 100%; max-width: 430px; padding: 24px 20px 28px; border-radius: 22px 22px 0 0; animation: slideUp 0.28s cubic-bezier(0.32,0.72,0,1); }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .modal-handle { width: 36px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 18px; }
+        .modal-title  { font-size: 1rem; font-weight: 700; margin-bottom: 20px; }
+        .type-toggle { display: grid; grid-template-columns: 1fr 1fr; background: var(--border); border-radius: var(--radius-sm); padding: 3px; gap: 3px; margin-bottom: 16px; }
+        .type-btn { padding: 10px; border: none; border-radius: 8px; font-family: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: transparent; color: var(--muted); transition: all 0.15s; }
+        .type-btn.active.income  { background: var(--surface); color: var(--success); box-shadow: var(--shadow-sm); }
+        .type-btn.active.expense { background: var(--surface); color: var(--danger); box-shadow: var(--shadow-sm); }
+        .form-group  { margin-bottom: 14px; }
+        .form-label  { display: block; font-size: 0.75rem; font-weight: 600; color: var(--text-sub); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .control { width: 100%; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); font-family: inherit; font-size: 0.95rem; color: var(--text); outline: none; transition: border-color 0.15s; }
+        .control:focus { border-color: var(--primary); }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .btn-primary { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); font-family: inherit; font-size: 0.95rem; font-weight: 700; cursor: pointer; transition: opacity 0.15s; margin-top: 4px; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-ghost { width: 100%; padding: 12px; background: none; color: var(--muted); border: none; border-radius: var(--radius-sm); font-family: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; margin-top: 6px; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════ AUTH SCREEN ═══════════════════ -->
+<div id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <div class="auth-logo-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <div>
+                <div class="auth-logo-name">Finance Tracker</div>
+                <div class="auth-logo-sub">Your personal money manager</div>
+            </div>
+        </div>
+
+        <div class="auth-tabs">
+            <button id="tab-signin" class="auth-tab active" onclick="switchAuthTab('signin')">Sign In</button>
+            <button id="tab-signup" class="auth-tab"        onclick="switchAuthTab('signup')">Create Account</button>
+        </div>
+
+        <!-- Sign In Form -->
+        <div id="form-signin">
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input class="control" id="a-email" type="email" placeholder="you@example.com" onkeydown="if(event.key==='Enter')signIn()">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input class="control" id="a-password" type="password" placeholder="Your password" onkeydown="if(event.key==='Enter')signIn()">
+            </div>
+            <div class="auth-error" id="signin-error"></div>
+            <button class="btn-primary" id="btn-signin" onclick="signIn()">Sign In</button>
+        </div>
+
+        <!-- Sign Up Form -->
+        <div id="form-signup" style="display:none">
+            <div class="form-group">
+                <label class="form-label">Name <span style="color:var(--muted);font-weight:400;text-transform:none;">(optional)</span></label>
+                <input class="control" id="a-name" type="text" placeholder="Your name">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input class="control" id="a-email2" type="email" placeholder="you@example.com">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input class="control" id="a-pw2" type="password" placeholder="Min. 6 characters">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Confirm Password</label>
+                <input class="control" id="a-pw-confirm" type="password" placeholder="Repeat password" onkeydown="if(event.key==='Enter')signUp()">
+            </div>
+            <div class="auth-error" id="signup-error"></div>
+            <button class="btn-primary" id="btn-signup" onclick="signUp()">Create Account</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════ VERIFY SCREEN ═══════════════════ -->
+<div id="verify-screen" class="auth-screen">
+    <div class="verify-card">
+        <div class="verify-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        </div>
+        <div class="verify-title">Check Your Email</div>
+        <div class="verify-body">
+            We sent a verification link to<br>
+            <strong id="verify-email-addr" style="color:var(--primary)"></strong><br><br>
+            Click the link in your email to verify your account, then return here to sign in.
+        </div>
+        <button class="btn-primary" onclick="showAuthScreen('signin')">Back to Sign In</button>
+        <button class="btn-ghost" style="margin-top:8px;" onclick="resendVerification()">Resend verification email</button>
+        <div class="auth-error" id="resend-status" style="text-align:center; margin-top:6px;"></div>
+    </div>
+</div>
+
+<!-- ═══════════════════ MAIN APP ═══════════════════ -->
+<div id="main-app" class="app-shell" style="display:none">
+
+    <!-- ─── HOME VIEW ─── -->
+    <div id="view-home" class="view active" style="padding:0 0 20px;">
+
+        <!-- Unclaimed Data Banner -->
+        <div class="unclaimed-banner" id="unclaimed-banner">
+            <div class="unclaimed-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div style="flex:1">
+                <div class="unclaimed-title">Existing Data Found</div>
+                <div class="unclaimed-detail" id="unclaimed-detail">Records without an owner were found in the database.</div>
+                <button class="btn-claim" id="btn-claim" onclick="claimData()">Restore My Data</button>
+                <br>
+                <button class="btn-dismiss-claim" onclick="document.getElementById('unclaimed-banner').classList.remove('show')">Dismiss</button>
+            </div>
+        </div>
+
+        <div class="page-header" style="padding-top:22px;">
+            <div>
+                <div class="page-title">Finance Tracker</div>
+                <div class="page-subtitle" id="today-label">Loading...</div>
+            </div>
+            <div style="width:36px;height:36px;background:var(--primary-light);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--primary);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+        </div>
+
+        <div class="balance-card">
+            <div class="balance-label">Total Balance</div>
+            <div class="balance-amount" id="val-balance">&#x20B1;0.00</div>
+            <div class="balance-period">All accounts</div>
+        </div>
+
+        <div class="filter-row" id="timeframe-container">
+            <button class="pill active"   onclick="changeTimeframe('today',      this)">Today</button>
+            <button class="pill"          onclick="changeTimeframe('yesterday',   this)">Yesterday</button>
+            <button class="pill"          onclick="changeTimeframe('last_week',   this)">Last Week</button>
+            <button class="pill"          onclick="changeTimeframe('last_month',  this)">Last Month</button>
+        </div>
+
+        <div class="stat-row">
+            <div class="stat-card">
+                <div class="stat-icon income-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
+                <div class="stat-label">Income</div>
+                <div class="stat-val positive" id="val-income">&#x20B1;0.00</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon expense-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg></div>
+                <div class="stat-label">Expenses</div>
+                <div class="stat-val negative" id="val-expense">&#x20B1;0.00</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon savings-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+                <div class="stat-label">Savings</div>
+                <div class="stat-val neutral" id="val-rate">0%</div>
+            </div>
+        </div>
+
+        <div class="section-head">
+            <div class="section-title">Recent Activity</div>
+            <div class="section-link" onclick="switchView('tx', document.querySelectorAll('.nav-item')[1])">See all</div>
+        </div>
+        <div class="tx-list" id="dashboard-tx">
+            <div class="empty-state"><div class="empty-icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>Loading transactions...</div>
+        </div>
+
+        <div class="quote-box">
+            <div class="quote-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 14.725c0-5.141 3.892-10.519 10-11.725l.944 2c-3.211.758-5.944 3.048-5.944 5.843h5v9.157h-10v-5.275zm-13 0c0-5.141 3.892-10.519 10-11.725l.944 2c-3.211.758-5.944 3.048-5.944 5.843h5v9.157h-10v-5.275z"/></svg></div>
+            <div>
+                <div class="quote-label">Saving Tip</div>
+                <div class="quote-text" id="txt-quote">"Loading inspiration..."</div>
+                <a href="#" id="lnk-quote" target="_blank" class="quote-link">Learn more <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── TRANSACTIONS VIEW ─── -->
+    <div id="view-tx" class="view" style="padding:0 0 20px;">
+        <div class="page-header" style="padding-top:22px; padding-bottom:16px;">
+            <div class="page-title">Transactions</div>
+        </div>
+        <div class="date-row">
+            <div class="date-label">Filter by date</div>
+            <input type="date" class="date-input" id="date-filter" onchange="loadAllTransactions()">
+        </div>
+        <div class="tx-list" id="full-tx-list"></div>
+    </div>
+
+    <!-- ─── ACCOUNTS VIEW ─── -->
+    <div id="view-accounts" class="view" style="padding:0 0 28px;">
+        <div class="page-header" style="padding-top:22px; padding-bottom:16px;">
+            <div class="page-title">Accounts</div>
+        </div>
+
+        <!-- Summary Grid: Net Worth | Today's Goal -->
+        <div class="accounts-summary-grid">
+
+            <!-- Net Worth -->
+            <div class="networth-card">
+                <div class="networth-label">Net Worth</div>
+                <div class="networth-val" id="val-networth">&#x20B1;0.00</div>
+                <div class="networth-stack">
+                    <div class="networth-stack-item">
+                        <span class="networth-stack-label">Assets</span>
+                        <span class="networth-stack-val assets" id="val-total-assets">&#x20B1;0.00</span>
+                    </div>
+                    <div class="networth-stack-item">
+                        <span class="networth-stack-label">Liabilities</span>
+                        <span class="networth-stack-val liabs" id="val-total-liabs">&#x20B1;0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Today's Goal -->
+            <div class="goal-card">
+                <div class="goal-card-label">Today's Goal</div>
+                <div id="goal-display-set" style="display:none;">
+                    <div class="goal-card-amount" id="goal-target-val">&#x20B1;0.00</div>
+                    <div class="goal-progress-track">
+                        <div class="goal-progress-fill" id="goal-progress-fill" style="width:0%"></div>
+                    </div>
+                    <div class="goal-earned"    id="goal-earned-val">&#x20B1;0.00 earned</div>
+                    <div class="goal-remaining" id="goal-remaining-val">&#x20B1;0.00 left</div>
+                </div>
+                <div id="goal-display-unset">
+                    <div class="goal-not-set">No goal set.<br>Set one in Profile → Settings.</div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="due-alerts" id="due-alerts"></div>
+
+        <!-- Transfer Funds -->
+        <div style="padding:14px 18px 0;">
+            <button class="transfer-action-btn" onclick="openTransferModal()">
+                <div class="transfer-action-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                </div>
+                <div class="transfer-action-label">
+                    <strong>Transfer Funds</strong>
+                    <span>Move money between your accounts</span>
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+        </div>
+
+        <div class="accounts-section">
+            <div class="accounts-section-head"><div class="accounts-section-title">Assets</div></div>
+            <div class="tx-list" style="padding:0;" id="accounts-list"></div>
+        </div>
+
+        <div class="accounts-section" style="margin-top:20px;">
+            <div class="accounts-section-head"><div class="accounts-section-title">Liabilities</div></div>
+            <div class="tx-list" style="padding:0;" id="liabilities-list"></div>
+            <div style="margin-top:8px;">
+                <button class="btn-toggle-add" onclick="toggleAddLiability()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Add Liability
+                </button>
+                <div class="add-liability-panel" id="add-liability-panel" style="margin-top:8px;">
+                    <div class="add-liability-row">
+                        <input type="text"   class="control-sm" id="l-name"   placeholder="e.g. Motorcycle Loan">
+                        <input type="number" class="control-sm" id="l-amount" placeholder="Amount" min="0.01" step="0.01">
+                    </div>
+                    <div>
+                        <div style="font-size:0.7rem;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Due Date <span style="font-weight:400;color:var(--muted);">(optional)</span></div>
+                        <input type="date" class="control-sm" id="l-due">
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+                        <button class="btn-add-liability" id="btn-add-liab" onclick="addLiability()">Save</button>
+                        <button onclick="toggleAddLiability()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-family:inherit;font-size:0.82rem;font-weight:600;white-space:nowrap;">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── PROFILE VIEW ─── -->
+    <div id="view-profile" class="view" style="padding:0 0 28px;">
+        <div class="page-header" style="padding-top:22px; padding-bottom:16px;">
+            <div class="page-title">Profile</div>
+        </div>
+        <div style="padding:0 18px; display:flex; flex-direction:column;">
+
+            <!-- User Card -->
+            <div class="profile-user-card">
+                <div class="profile-avatar" id="p-avatar">?</div>
+                <div>
+                    <div class="profile-name"  id="p-name">Loading...</div>
+                    <div class="profile-email" id="p-email"></div>
+                </div>
+            </div>
+
+            <!-- Settings -->
+            <div class="profile-section-label">Settings</div>
+            <div class="profile-action-row">
+                <button class="profile-action-btn" onclick="switchView('settings-accounts', null)">
+                    <div class="profile-action-icon blue"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div>
+                    <div class="profile-action-label">Accounts<span>Manage GCash, MariBank, Cash and more</span></div>
+                    <svg class="profile-action-chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+                <button class="profile-action-btn" onclick="switchView('settings-categories', null)">
+                    <div class="profile-action-icon blue"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h8m-8 6h16"/></svg></div>
+                    <div class="profile-action-label">Categories<span>Customize transaction categories</span></div>
+                    <svg class="profile-action-chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+                <button class="profile-action-btn" onclick="switchView('settings-goal', null)">
+                    <div class="profile-action-icon blue"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                    <div class="profile-action-label">Daily Goal<span id="profile-goal-sub">Set your daily earnings target</span></div>
+                    <svg class="profile-action-chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+            </div>
+
+            <!-- Data Actions -->
+            <div class="profile-section-label">Data</div>
+            <div class="profile-action-row">
+                <button class="profile-action-btn" onclick="exportData()">
+                    <div class="profile-action-icon blue"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                    <div class="profile-action-label">Export Backup<span>Download all data as a JSON file</span></div>
+                    <svg class="profile-action-chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+                <button class="profile-action-btn" onclick="document.getElementById('import-file').click()">
+                    <div class="profile-action-icon green"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+                    <div class="profile-action-label">Import from Backup<span>Restore data from a JSON backup file</span></div>
+                    <svg class="profile-action-chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+            </div>
+            <input type="file" id="import-file" accept=".json" style="display:none" onchange="importFromFile(event)">
+
+            <!-- Account -->
+            <div class="profile-section-label">Account</div>
+            <div class="profile-action-row">
+                <button class="profile-action-btn danger" onclick="signOut()">
+                    <div class="profile-action-icon red"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></div>
+                    <div class="profile-action-label">Sign Out<span>You will be returned to the login screen</span></div>
+                    <svg class="profile-action-chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── SETTINGS: ACCOUNTS ─── -->
+    <div id="view-settings-accounts" class="view" style="padding:0 0 28px;">
+        <div class="page-header" style="padding-top:22px; padding-bottom:16px;">
+            <button class="settings-back-btn" onclick="switchView('profile', document.querySelectorAll('.nav-item')[3])">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+            </button>
+            <div class="page-title">Accounts</div>
+            <div style="width:52px;"></div>
+        </div>
+        <div style="padding:0 18px; display:flex; flex-direction:column; gap:8px;">
+            <div id="settings-accounts-list"></div>
+            <button class="btn-toggle-add" onclick="toggleForm('add-account-form')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add Account
+            </button>
+            <div class="settings-inline-form" id="add-account-form">
+                <div class="settings-two-col">
+                    <div><div style="font-size:0.72rem;font-weight:600;color:var(--text-sub);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.4px;">Name</div>
+                    <input type="text"   class="control-sm" id="na-name"    placeholder="e.g. GCash"></div>
+                    <div><div style="font-size:0.72rem;font-weight:600;color:var(--text-sub);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.4px;">Balance</div>
+                    <input type="number" class="control-sm" id="na-balance" placeholder="0.00" step="0.01"></div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-save-sm" id="btn-add-account" onclick="addAccount()">Add Account</button>
+                    <button class="btn-cancel-sm" onclick="toggleForm('add-account-form')">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── SETTINGS: CATEGORIES ─── -->
+    <div id="view-settings-categories" class="view" style="padding:0 0 28px;">
+        <div class="page-header" style="padding-top:22px; padding-bottom:16px;">
+            <button class="settings-back-btn" onclick="switchView('profile', document.querySelectorAll('.nav-item')[3])">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+            </button>
+            <div class="page-title">Categories</div>
+            <div style="width:52px;"></div>
+        </div>
+        <div style="padding:0 18px; display:flex; flex-direction:column; gap:8px;">
+            <div id="settings-categories-list"></div>
+            <button class="btn-toggle-add" onclick="toggleForm('add-category-form')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add Category
+            </button>
+            <div class="settings-inline-form" id="add-category-form">
+                <div class="settings-two-col">
+                    <div><div style="font-size:0.72rem;font-weight:600;color:var(--text-sub);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.4px;">Name</div>
+                    <input type="text" class="control-sm" id="nc-name" placeholder="e.g. Food &amp; Dining"></div>
+                    <div><div style="font-size:0.72rem;font-weight:600;color:var(--text-sub);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.4px;">Type</div>
+                    <select class="control-sm" id="nc-type">
+                        <option value="expense">Expense</option>
+                        <option value="income">Income</option>
+                        <option value="both">Both</option>
+                    </select></div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-save-sm" id="btn-add-category" onclick="addCategory()">Add Category</button>
+                    <button class="btn-cancel-sm" onclick="toggleForm('add-category-form')">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── SETTINGS: DAILY GOAL ─── -->
+    <div id="view-settings-goal" class="view" style="padding:0 0 28px;">
+        <div class="page-header" style="padding-top:22px; padding-bottom:16px;">
+            <button class="settings-back-btn" onclick="switchView('profile', document.querySelectorAll('.nav-item')[3])">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+            </button>
+            <div class="page-title">Daily Goal</div>
+            <div style="width:52px;"></div>
+        </div>
+        <div style="padding:0 18px; display:flex; flex-direction:column; gap:14px;">
+
+            <!-- Explanation -->
+            <div style="background:var(--primary-light);border:1px solid var(--primary-muted);border-radius:var(--radius);padding:14px 16px;">
+                <div style="font-size:0.78rem;font-weight:700;color:var(--primary);margin-bottom:6px;">How it works</div>
+                <div style="font-size:0.78rem;color:var(--text-sub);line-height:1.55;">
+                    Set a daily earnings target. Income transactions with the category
+                    <strong>SFD</strong> or <strong>Lalamove</strong> automatically count toward your goal.
+                    Progress resets every day.
+                </div>
+            </div>
+
+            <!-- Current goal display -->
+            <div class="settings-item-card">
+                <div class="settings-item-row">
+                    <div class="settings-item-icon blue">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    </div>
+                    <div class="settings-item-body">
+                        <div class="settings-item-name">Current Daily Target</div>
+                        <div class="settings-item-sub" id="goal-current-display">Not set</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit form -->
+            <div>
+                <div style="font-size:0.72rem;font-weight:600;color:var(--text-sub);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;">
+                    New Target Amount
+                </div>
+                <input type="number" class="control" id="goal-input" placeholder="e.g. 2000.00" min="0" step="0.01" style="margin-bottom:10px;">
+                <button class="btn-primary" id="btn-save-goal" onclick="saveGoalSetting()">Save Daily Goal</button>
+                <button class="btn-ghost" style="margin-top:6px;" onclick="saveGoalSetting(true)">Remove Goal</button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ─── BOTTOM NAV ─── -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" onclick="switchView('home', this)">
+            <i data-lucide="layout-dashboard" style="width:20px;height:20px;"></i>Home
+        </button>
+        <button class="nav-item" onclick="switchView('tx', this)">
+            <i data-lucide="list" style="width:20px;height:20px;"></i>History
+        </button>
+        <button class="nav-add" onclick="toggleModal(true)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="nav-item" onclick="switchView('accounts', this)">
+            <i data-lucide="wallet" style="width:20px;height:20px;"></i>Accounts
+        </button>
+        <button class="nav-item" onclick="switchView('profile', this)">
+            <i data-lucide="user" style="width:20px;height:20px;"></i>Profile
+        </button>
+    </nav>
+
+    <!-- ─── TRANSACTION MODAL ─── -->
+    <div class="modal" id="tx-modal" onclick="if(event.target===this)toggleModal(false)">
+        <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <div class="modal-title" id="modal-title">Add Transaction</div>
+            <div class="type-toggle" id="type-toggle">
+                <button class="type-btn active income"  onclick="setType('income', this)">&#x2191; Income</button>
+                <button class="type-btn expense"         onclick="setType('expense',this)">&#x2193; Expense</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description</label>
+                <input type="text" class="control" id="f-desc" placeholder="e.g. Delivery Payout">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Account</label>
+                    <select class="control" id="f-account"></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Amount</label>
+                    <input type="number" class="control" id="f-amount" placeholder="0.00" min="0.01" step="0.01">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Category <span style="color:var(--muted);font-weight:400;text-transform:none;">(optional)</span></label>
+                <select class="control" id="f-category">
+                    <option value="">— No category —</option>
+                </select>
+            </div>
+            <button class="btn-primary" id="btn-save" onclick="saveTransaction()">Save Transaction</button>
+            <button class="btn-ghost" onclick="toggleModal(false)">Cancel</button>
+        </div>
+    </div>
+    <!-- ─── TRANSFER MODAL ─── -->
+    <div class="modal" id="transfer-modal" onclick="if(event.target===this)closeTransferModal()">
+        <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <div class="modal-title">Transfer Funds</div>
+
+            <div class="form-group">
+                <label class="form-label">From Account</label>
+                <select class="control" id="t-from" onchange="validateTransferAccounts()"></select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">To Account</label>
+                <select class="control" id="t-to" onchange="validateTransferAccounts()"></select>
+            </div>
+            <div id="transfer-same-error" style="font-size:0.78rem;color:var(--danger);margin:-8px 0 10px;display:none;">
+                Source and destination must be different accounts.
+            </div>
+            <div class="form-group">
+                <label class="form-label">Amount</label>
+                <input type="number" class="control" id="t-amount" placeholder="0.00" min="0.01" step="0.01">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description <span style="color:var(--muted);font-weight:400;text-transform:none;">(optional)</span></label>
+                <input type="text" class="control" id="t-desc" placeholder="e.g. Savings allocation">
+            </div>
+
+            <button class="btn-primary" id="btn-transfer" onclick="saveTransfer()">Transfer Funds</button>
+            <button class="btn-ghost" onclick="closeTransferModal()">Cancel</button>
+        </div>
+    </div>
+
+</div><!-- /#main-app -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+    const API = '/api';
+
+    // ── Auth State ────────────────────────────────────────────────────────────
+    let authToken   = localStorage.getItem('ft_token');
+    let currentUser = null;
+    let pendingVerifyEmail = '';
+
+    // ── App State ─────────────────────────────────────────────────────────────
+    let editingId = null;
+    let currentType = 'income';
+    let currentTimeframe = 'today';
+    var _accounts   = [];   // cached for transfer modal dropdowns
+    var _categories = [];   // cached for transaction modal dropdown
+
+    const financeQuotes = [
+        { text: "Do not save what is left after spending, but spend what is left after saving.", url: "https://www.investopedia.com/articles/financial-theory/08/investing-lessons-warren-buffett.asp" },
+        { text: "Beware of little expenses; a small leak will sink a great ship.", url: "https://www.investopedia.com/terms/b/budget.asp" },
+        { text: "Set aside your gas money and daily float first before calculating your take-home earnings.", url: "https://www.investopedia.com/guide-to-financial-literacy-4846387" },
+        { text: "An emergency fund is your safety net. Aim to save 3 months of basic riding expenses.", url: "https://www.investopedia.com/terms/e/emergency_fund.asp" }
+    ];
+
+    // ── Utilities ─────────────────────────────────────────────────────────────
+    const fmt = v => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(v);
+
+    function showToast(msg, type = '') {
+        const el = document.getElementById('toast');
+        el.textContent = msg;
+        el.className = 'toast ' + type + ' show';
+        setTimeout(() => { el.className = 'toast'; }, 3500);
+    }
+
+    function getTimeframeBounds(tf) {
+        const now = new Date();
+        const s = new Date(now); s.setHours(0,0,0,0);
+        const e = new Date(now); e.setHours(23,59,59,999);
+        if (tf === 'yesterday') { s.setDate(s.getDate()-1); e.setDate(e.getDate()-1); }
+        else if (tf === 'last_week') {
+            const day = s.getDay();
+            const diff = s.getDate() - day + (day===0?-6:1);
+            s.setDate(diff-7); e.setDate(diff-1);
+        } else if (tf === 'last_month') { s.setMonth(s.getMonth()-1,1); e.setMonth(e.getMonth(),0); }
+        return { start: s.toISOString(), end: e.toISOString() };
+    }
+
+    function setTodayLabel() {
+        document.getElementById('today-label').textContent =
+            new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+    }
+
+    // ── apiFetch — adds auth header to every request ──────────────────────────
+    async function apiFetch(url, options = {}) {
+        const headers = Object.assign(
+            { 'Content-Type': 'application/json' },
+            authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+            options.headers || {}
+        );
+        return fetch(url, Object.assign({}, options, { headers }));
+    }
+
+    // ── Auth Screen Helpers ───────────────────────────────────────────────────
+    function showAuthScreen(tab) {
+        document.getElementById('auth-screen').classList.add('visible');
+        document.getElementById('verify-screen').classList.remove('visible');
+        document.getElementById('main-app').style.display = 'none';
+        if (tab) switchAuthTab(tab);
+        lucide.createIcons();
+    }
+
+    function showVerifyScreen(email) {
+        pendingVerifyEmail = email || '';
+        document.getElementById('verify-email-addr').textContent = email || '';
+        document.getElementById('verify-screen').classList.add('visible');
+        document.getElementById('auth-screen').classList.remove('visible');
+        document.getElementById('main-app').style.display = 'none';
+        document.getElementById('resend-status').textContent = '';
+        lucide.createIcons();
+    }
+
+    function showMainApp() {
+        document.getElementById('auth-screen').classList.remove('visible');
+        document.getElementById('verify-screen').classList.remove('visible');
+        document.getElementById('main-app').style.display = 'block';
+        lucide.createIcons();
+        // Pre-load categories so transaction card labels are ready immediately
+        apiFetch(API + '/categories')
+            .then(function(r){ return r.ok ? r.json() : []; })
+            .then(function(d){ _categories = d || []; })
+            .catch(function(){})
+            .finally(function(){
+                updateProfileUI();
+                loadDashboard(currentTimeframe);
+                checkUnclaimedData();
+            });
+    }
+
+    function switchAuthTab(tab) {
+        const isSignin = (tab === 'signin');
+        document.getElementById('form-signin').style.display = isSignin ? 'block' : 'none';
+        document.getElementById('form-signup').style.display = isSignin ? 'none'  : 'block';
+        document.getElementById('tab-signin').classList.toggle('active',  isSignin);
+        document.getElementById('tab-signup').classList.toggle('active', !isSignin);
+        document.getElementById('signin-error').textContent = '';
+        document.getElementById('signup-error').textContent = '';
+    }
+
+    function setAuthError(id, msg) {
+        document.getElementById(id).textContent = msg;
+    }
+
+    // ── Sign In ───────────────────────────────────────────────────────────────
+    async function signIn() {
+        const email    = document.getElementById('a-email').value.trim();
+        const password = document.getElementById('a-password').value;
+        if (!email || !password) { setAuthError('signin-error', 'Enter your email and password'); return; }
+
+        const btn = document.getElementById('btn-signin');
+        btn.textContent = 'Signing in...'; btn.disabled = true;
+
+        try {
+            const res  = await fetch(API + '/auth/signin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                if (data.code === 'EMAIL_NOT_VERIFIED') { showVerifyScreen(data.email || email); return; }
+                setAuthError('signin-error', data.error || 'Sign in failed'); return;
+            }
+            authToken   = data.token;
+            currentUser = data.user;
+            localStorage.setItem('ft_token', authToken);
+            showMainApp();
+        } catch (e) {
+            setAuthError('signin-error', 'Connection error. Is the server running?');
+        } finally {
+            btn.textContent = 'Sign In'; btn.disabled = false;
+        }
+    }
+
+    // ── Sign Up ───────────────────────────────────────────────────────────────
+    async function signUp() {
+        const name    = document.getElementById('a-name').value.trim();
+        const email   = document.getElementById('a-email2').value.trim();
+        const pw      = document.getElementById('a-pw2').value;
+        const confirm = document.getElementById('a-pw-confirm').value;
+
+        if (!email || !pw)   { setAuthError('signup-error', 'Enter your email and password'); return; }
+        if (pw !== confirm)  { setAuthError('signup-error', 'Passwords do not match'); return; }
+        if (pw.length < 6)   { setAuthError('signup-error', 'Password must be at least 6 characters'); return; }
+
+        const btn = document.getElementById('btn-signup');
+        btn.textContent = 'Creating account...'; btn.disabled = true;
+
+        try {
+            const res  = await fetch(API + '/auth/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password: pw, name })
+            });
+            const data = await res.json();
+            if (!res.ok) { setAuthError('signup-error', data.error || 'Sign up failed'); return; }
+            showVerifyScreen(data.email || email);
+        } catch (e) {
+            setAuthError('signup-error', 'Connection error. Is the server running?');
+        } finally {
+            btn.textContent = 'Create Account'; btn.disabled = false;
+        }
+    }
+
+    // ── Resend Verification ───────────────────────────────────────────────────
+    async function resendVerification() {
+        if (!pendingVerifyEmail) return;
+        document.getElementById('resend-status').textContent = 'Sending...';
+        try {
+            const res  = await fetch(API + '/auth/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: pendingVerifyEmail, password: '__resend_placeholder__' })
+            });
+            document.getElementById('resend-status').textContent = 'Verification email re-sent. Check your inbox.';
+            document.getElementById('resend-status').style.color = 'var(--success)';
+        } catch (e) {
+            document.getElementById('resend-status').textContent = 'Could not resend. Try again later.';
+        }
+    }
+
+    // ── Sign Out ──────────────────────────────────────────────────────────────
+    async function signOut() {
+        if (!confirm('Sign out of Finance Tracker?')) return;
+        try { await apiFetch(API + '/auth/signout', { method: 'POST' }); } catch (_) {}
+        authToken   = null;
+        currentUser = null;
+        localStorage.removeItem('ft_token');
+        showAuthScreen('signin');
+    }
+
+    // ── Profile UI ────────────────────────────────────────────────────────────
+    function updateProfileUI() {
+        if (!currentUser) return;
+        const initials = (currentUser.name || currentUser.email || '?')
+            .split(' ').slice(0, 2).map(function(w){ return w[0].toUpperCase(); }).join('');
+        document.getElementById('p-avatar').textContent = initials;
+        document.getElementById('p-name').textContent   = currentUser.name  || currentUser.email.split('@')[0];
+        document.getElementById('p-email').textContent  = currentUser.email || '';
+    }
+
+    // ── Unclaimed Data ────────────────────────────────────────────────────────
+    async function checkUnclaimedData() {
+        try {
+            const res  = await apiFetch(API + '/unclaimed');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.total > 0) {
+                const pl = function(n, w){ return n + ' ' + w + (n !== 1 ? 's' : ''); };
+                document.getElementById('unclaimed-detail').textContent =
+                    pl(data.accounts,'account') + ', ' + pl(data.transactions,'transaction') + ', and ' +
+                    data.liabilities + ' liabilit' + (data.liabilities !== 1 ? 'ies' : 'y') +
+                    ' found without an owner. Restore them to your profile.';
+                document.getElementById('unclaimed-banner').classList.add('show');
+            }
+        } catch (_) {}
+    }
+
+    async function claimData() {
+        const btn = document.getElementById('btn-claim');
+        btn.textContent = 'Restoring...'; btn.disabled = true;
+        try {
+            const res  = await apiFetch(API + '/import/claim', { method: 'POST' });
+            const data = await res.json();
+            document.getElementById('unclaimed-banner').classList.remove('show');
+            showToast(
+                'Restored: ' + data.claimed.accounts + ' accounts, ' +
+                data.claimed.transactions + ' transactions, ' +
+                data.claimed.liabilities + ' liabilities',
+                'success'
+            );
+            loadDashboard(currentTimeframe);
+        } catch (e) {
+            showToast('Failed to restore data', 'error');
+        } finally {
+            btn.textContent = 'Restore My Data'; btn.disabled = false;
+        }
+    }
+
+    // ── Export ────────────────────────────────────────────────────────────────
+    async function exportData() {
+        try {
+            const res = await apiFetch(API + '/export');
+            if (!res.ok) { showToast('Export failed', 'error'); return; }
+            const data = await res.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = 'finance-backup-' + new Date().toISOString().split('T')[0] + '.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Backup downloaded!', 'success');
+        } catch (e) { showToast('Export failed', 'error'); }
+    }
+
+    // ── Import ────────────────────────────────────────────────────────────────
+    async function importFromFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        event.target.value = '';
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            if (!data.accounts && !data.transactions && !data.liabilities) {
+                showToast('Invalid backup file', 'error'); return;
+            }
+            const acLen   = (data.accounts     || []).length;
+            const txLen   = (data.transactions  || []).length;
+            const liabLen = (data.liabilities   || []).length;
+            if (!confirm('Import ' + acLen + ' accounts, ' + txLen + ' transactions, ' + liabLen + ' liabilities?')) return;
+
+            const res    = await apiFetch(API + '/import/json', { method: 'POST', body: JSON.stringify(data) });
+            const result = await res.json();
+            if (!res.ok) { showToast(result.error || 'Import failed', 'error'); return; }
+            showToast(
+                'Imported: ' + result.imported.accounts + ' accounts, ' +
+                result.imported.transactions + ' transactions, ' +
+                result.imported.liabilities + ' liabilities',
+                'success'
+            );
+            loadDashboard(currentTimeframe);
+        } catch (e) { showToast('Failed to read backup file', 'error'); }
+    }
+
+    // ── Navigation ────────────────────────────────────────────────────────────
+    function switchView(view, btn) {
+        document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
+        document.querySelectorAll('.nav-item').forEach(function(n){ n.classList.remove('active'); });
+        document.getElementById('view-' + view).classList.add('active');
+
+        // Settings sub-views: keep Profile nav highlighted
+        const profileNav = document.querySelectorAll('.nav-item')[3];
+        if (view === 'settings-accounts' || view === 'settings-categories' || view === 'settings-goal') {
+            if (profileNav) profileNav.classList.add('active');
+        } else if (btn) {
+            btn.classList.add('active');
+        }
+
+        if (view === 'tx')                   loadAllTransactions();
+        if (view === 'accounts')             loadAccounts();
+        if (view === 'settings-accounts')    loadSettingsAccounts();
+        if (view === 'settings-categories')  loadSettingsCategories();
+        if (view === 'settings-goal')        loadSettingsGoal();
+    }
+
+    function changeTimeframe(tf, el) {
+        document.querySelectorAll('#timeframe-container .pill').forEach(function(p){ p.classList.remove('active'); });
+        el.classList.add('active');
+        currentTimeframe = tf;
+        loadDashboard(tf);
+    }
+
+    // ── Type Toggle ───────────────────────────────────────────────────────────
+    function setType(type, btn) {
+        currentType = type;
+        document.querySelectorAll('#type-toggle .type-btn').forEach(function(b){ b.classList.remove('active'); });
+        btn.classList.add('active');
+        refreshCategoryDropdown(type);
+    }
+
+    // ── Transaction Modal ─────────────────────────────────────────────────────
+    function toggleModal(show, txData) {
+        document.getElementById('tx-modal').classList.toggle('active', show);
+        if (!show) { editingId = null; resetForm(); return; }
+        loadCategories();          // refresh category list on open
+        if (txData) {
+            editingId = txData.id;
+            document.getElementById('modal-title').textContent = 'Edit Transaction';
+            document.getElementById('f-desc').value    = txData.description || '';
+            document.getElementById('f-account').value = txData.account_id;
+            document.getElementById('f-amount').value  = txData.amount;
+            currentType = txData.type;
+            document.querySelectorAll('#type-toggle .type-btn').forEach(function(b){
+                b.classList.toggle('active', b.classList.contains(txData.type));
+            });
+            // Set category after dropdown is populated (slight delay for async)
+            setTimeout(function(){
+                document.getElementById('f-category').value = txData.category_id || '';
+            }, 100);
+        }
+    }
+
+    function resetForm() {
+        document.getElementById('modal-title').textContent = 'Add Transaction';
+        document.getElementById('f-desc').value     = '';
+        document.getElementById('f-amount').value   = '';
+        document.getElementById('f-category').value = '';
+        currentType = 'income';
+        document.querySelectorAll('#type-toggle .type-btn').forEach(function(b){
+            b.classList.toggle('active', b.classList.contains('income'));
+        });
+    }
+
+    // ── Render Helpers ────────────────────────────────────────────────────────
+    function getAccName(id) {
+        var a = _accounts.find(function(x){ return x.id === id; });
+        return a ? a.name : 'Account';
+    }
+
+    function getCategoryName(id) {
+        if (!id || !_categories.length) return '';
+        var cat = _categories.find(function(c){ return c.id === id; });
+        return cat ? cat.name : '';
+    }
+
+    function renderActivityList(list, targetId) {
+        const c = document.getElementById(targetId);
+        if (!list || list.length === 0) {
+            c.innerHTML = '<div class="empty-state"><div class="empty-icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>No activity found for this period.</div>';
+            return;
+        }
+        c.innerHTML = list.map(function(item) {
+            const dateStr = new Date(item.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+
+            if (item._type === 'transfer') {
+                return '<div class="tx-card">' +
+                    '<div class="tx-icon transfer"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>' +
+                    '<div class="tx-body"><div class="tx-desc">' + (item.description || 'Transfer') + '</div>' +
+                    '<div class="tx-meta">' + dateStr + ' &middot; ' + getAccName(item.from_account_id) + ' &rarr; ' + getAccName(item.to_account_id) + '</div></div>' +
+                    '<div class="tx-right">' +
+                    '<span class="tx-amount transfer-amt">' + fmt(item.amount) + '</span>' +
+                    '<span style="font-size:0.65rem;color:var(--primary);font-weight:600;background:var(--primary-light);padding:1px 7px;border-radius:10px;margin-top:2px;">Transfer</span>' +
+                    '</div></div>';
+            }
+
+            const isInc  = item.type === 'income';
+            const txJson = JSON.stringify(item).replace(/'/g, '&#39;');
+            return '<div class="tx-card">' +
+                '<div class="tx-icon ' + (isInc ? 'income' : 'expense') + '">' +
+                (isInc
+                    ? '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>'
+                    : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>') +
+                '</div>' +
+                '<div class="tx-body"><div class="tx-desc">' + (item.description || 'No description') + '</div>' +
+                '<div class="tx-meta">' + dateStr + ' &middot; ' + (item.accounts ? item.accounts.name : 'Account') + (getCategoryName(item.category_id) ? ' &middot; ' + getCategoryName(item.category_id) : '') + '</div></div>' +
+                '<div class="tx-right">' +
+                '<span class="tx-amount ' + (isInc ? 'positive' : 'negative') + '">' + (isInc ? '+' : '-') + fmt(item.amount) + '</span>' +
+                '<button class="btn-edit" onclick=\'toggleModal(true,' + txJson + ')\' title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>' +
+                '</div></div>';
+        }).join('');
+    }
+
+    // Backward-compat: wrap plain transaction list
+    function renderTransactions(list, targetId) {
+        renderActivityList((list || []).map(function(t){ return Object.assign({}, t, { _type: 'transaction' }); }), targetId);
+    }
+
+    // ── Accounts / Liabilities ────────────────────────────────────────────────
+    function getDaysUntilDue(d) {
+        if (!d) return null;
+        const today = new Date(); today.setHours(0,0,0,0);
+        const due   = new Date(d + 'T00:00:00');
+        return Math.floor((due - today) / 86400000);
+    }
+    function fmtDueDate(s) {
+        if (!s) return '';
+        return new Date(s + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    }
+    function dueBadgeHtml(days, ds) {
+        if (days === null) return '';
+        if (days < 0)  return '<span class="due-badge overdue">' + Math.abs(days) + 'd overdue</span>';
+        if (days === 0) return '<span class="due-badge urgent">Due Today</span>';
+        if (days === 1) return '<span class="due-badge urgent">Due Tomorrow</span>';
+        if (days === 2) return '<span class="due-badge warning">Due in 2 days</span>';
+        if (days === 3) return '<span class="due-badge notice">Due in 3 days</span>';
+        return '<span class="due-badge safe">Due ' + fmtDueDate(ds) + '</span>';
+    }
+
+    function renderDueAlerts(liabilities) {
+        const c = document.getElementById('due-alerts');
+        if (!c) return;
+        const alerts = (liabilities || [])
+            .filter(function(l){ return l.due_date; })
+            .map(function(l){ return Object.assign({}, l, { days: getDaysUntilDue(l.due_date) }); })
+            .filter(function(l){ return l.days !== null && l.days <= 3; })
+            .sort(function(a,b){ return a.days - b.days; });
+        if (!alerts.length) { c.innerHTML = ''; return; }
+        c.innerHTML = alerts.map(function(l) {
+            const due = fmtDueDate(l.due_date), af = fmt(l.amount);
+            if (l.days < 0) return '<div class="alert-critical"><div class="alert-critical-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><div style="flex:1"><div class="alert-critical-title">&#x203C; OVERDUE &mdash; ' + Math.abs(l.days) + ' day' + (Math.abs(l.days)!==1?'s':'') + ' past due</div><div class="alert-critical-body">' + l.name + '</div><div class="alert-detail"><strong>' + af + '</strong>Original due: ' + due + '<br>This payment is past due. Pay immediately to avoid penalties.</div></div></div>';
+            if (l.days === 0) return '<div class="alert-critical"><div class="alert-critical-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><div style="flex:1"><div class="alert-critical-title">&#x203C; DUE TODAY</div><div class="alert-critical-body">' + l.name + '</div><div class="alert-detail"><strong>' + af + '</strong>Do not delay &mdash; pay this now to avoid late fees and penalties.</div></div></div>';
+            if (l.days === 1) return '<div class="alert-urgent"><div class="alert-urgent-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div><div style="flex:1"><div class="alert-urgent-title">&#x1F6A8; Payment Due TOMORROW</div><div class="alert-urgent-body">' + l.name + ' &mdash; due on <strong>' + due + '</strong>.</div><div class="alert-detail"><strong>Amount due: ' + af + '</strong>Your payment falls due tomorrow. Make sure your account has enough balance tonight. Late payment can result in penalties, extra interest, or a negative mark on your credit standing.<br><br>&#x2714; Check your account balance now.<br>&#x2714; Set up the transfer or prepare cash tonight.<br>&#x2714; Contact your lender early if you need more time.</div></div></div>';
+            if (l.days === 2) return '<div class="alert-warning"><div class="alert-warning-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div><div style="flex:1"><div class="alert-warning-title">&#x26A0; Payment Due in 2 Days</div><div class="alert-warning-body">' + l.name + ' &mdash; due on <strong>' + due + '</strong>.</div><div class="alert-detail"><strong>Amount due: ' + af + '</strong>You have 2 days left. Make sure your funds are ready and the payment is scheduled. Processing times can cause delays, especially for bank transfers or e-wallet payments.</div></div></div>';
+            return '<div class="alert-notice"><div class="alert-notice-icon"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div><div><div class="alert-notice-title">&#x1F4C5; Payment Due in 3 Days</div><div class="alert-notice-body"><strong>' + l.name + '</strong> &mdash; ' + af + '<br>Due: ' + due + '. Start preparing your payment.</div></div></div>';
+        }).join('');
+    }
+
+    function renderAccountsView(accounts, liabilities) {
+        renderDueAlerts(liabilities);
+
+        const ac = document.getElementById('accounts-list');
+        ac.innerHTML = (!accounts || !accounts.length)
+            ? '<div class="empty-state">No accounts found.</div>'
+            : accounts.map(function(a){ return '<div class="account-card"><div class="account-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div><div><div class="account-name">' + a.name + '</div><div class="account-balance">Current balance</div></div><div class="account-amount">' + fmt(a.balance) + '</div></div>'; }).join('');
+
+        const lc = document.getElementById('liabilities-list');
+        lc.innerHTML = (!liabilities || !liabilities.length)
+            ? '<div class="empty-state" style="padding:14px 0 8px;">No liabilities recorded yet.</div>'
+            : liabilities.map(function(l, i){
+                const days = getDaysUntilDue(l.due_date), badge = dueBadgeHtml(days, l.due_date);
+                return '<div class="liability-card"><div class="liability-num">' + (i+1) + '</div><div class="liability-name">' + l.name + (badge ? '<div style="margin-top:3px;">' + badge + '</div>' : '') + '</div><div class="liability-amount">-' + fmt(l.amount) + '</div><button class="btn-delete" onclick="deleteLiability(\'' + l.id + '\')" title="Remove"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
+            }).join('');
+
+        const ta = (accounts    || []).reduce(function(s,a){ return s + (parseFloat(a.balance)||0); }, 0);
+        const tl = (liabilities || []).reduce(function(s,l){ return s + (parseFloat(l.amount) ||0); }, 0);
+        const nw = ta - tl;
+        document.getElementById('val-total-assets').textContent = fmt(ta);
+        document.getElementById('val-total-liabs').textContent  = fmt(tl);
+        const nwEl = document.getElementById('val-networth');
+        nwEl.textContent = fmt(nw);
+        nwEl.className = 'networth-val ' + (nw >= 0 ? 'positive' : 'negative');
+    }
+
+    // ── Liability Form ────────────────────────────────────────────────────────
+    function toggleAddLiability() {
+        const p = document.getElementById('add-liability-panel');
+        const open = p.classList.toggle('open');
+        if (!open) {
+            document.getElementById('l-name').value   = '';
+            document.getElementById('l-amount').value = '';
+            document.getElementById('l-due').value    = '';
+        } else { document.getElementById('l-name').focus(); }
+    }
+
+    // ── API Calls ─────────────────────────────────────────────────────────────
+    async function loadDashboard(tf) {
+        try {
+            const bounds = getTimeframeBounds(tf || 'today');
+            const res  = await apiFetch(API + '/dashboard?start=' + bounds.start + '&end=' + bounds.end);
+            if (!res.ok) throw new Error('Server error ' + res.status);
+            const data = await res.json();
+
+            document.getElementById('val-balance').textContent = fmt(data.summary.totalBalance);
+            document.getElementById('val-income').textContent  = fmt(data.summary.income);
+            document.getElementById('val-expense').textContent = fmt(data.summary.expense);
+            document.getElementById('val-rate').textContent    = data.summary.savingsRate + '%';
+
+            const sel = document.getElementById('f-account');
+            sel.innerHTML = (data.accounts || []).map(function(a){ return '<option value="' + a.id + '">' + a.name + '</option>'; }).join('');
+
+            // Cache accounts for transfer modal
+            _accounts = data.accounts || [];
+
+            renderAccountsView(data.accounts, []);
+
+            // Merge recent transactions + transfers, sort by date, show top 5
+            var txItems = (data.recentTransactions || []).map(function(t){ return Object.assign({}, t, { _type: 'transaction' }); });
+            var trItems = (data.recentTransfers    || []).map(function(t){ return Object.assign({}, t, { _type: 'transfer'    }); });
+            var merged  = txItems.concat(trItems).sort(function(a, b){ return new Date(b.created_at) - new Date(a.created_at); }).slice(0, 5);
+            renderActivityList(merged, 'dashboard-tx');
+        } catch (e) {
+            console.error(e);
+            showToast('Failed to load dashboard', 'error');
+        }
+    }
+
+    async function loadAccounts() {
+        try {
+            const [dr, lr] = await Promise.all([
+                apiFetch(API + '/accounts'),
+                apiFetch(API + '/liabilities')
+            ]);
+            const accs  = dr.ok ? await dr.json() : [];
+            const liabs = lr.ok ? await lr.json() : [];
+            _accounts = accs;
+            renderAccountsView(accs, liabs);
+        } catch (e) {
+            console.error(e);
+            showToast('Failed to load accounts', 'error');
+        }
+        loadGoalToday(); // always refresh goal when accounts tab opens
+    }
+
+    async function loadAllTransactions() {
+        try {
+            const dateStr = document.getElementById('date-filter').value;
+            var params = '';
+            if (dateStr) {
+                const parts = dateStr.split('-');
+                const local = new Date(+parts[0], +parts[1]-1, +parts[2]);
+                const s = new Date(local); s.setHours(0,0,0,0);
+                const e = new Date(local); e.setHours(23,59,59,999);
+                params = '?start=' + s.toISOString() + '&end=' + e.toISOString();
+            }
+            const [txRes, trRes] = await Promise.all([
+                apiFetch(API + '/transactions' + params),
+                apiFetch(API + '/transfers'    + params)
+            ]);
+            const txList = txRes.ok ? await txRes.json() : [];
+            const trList = trRes.ok ? await trRes.json() : [];
+
+            var merged = txList.map(function(t){ return Object.assign({}, t, { _type: 'transaction' }); })
+                .concat(trList.map(function(t){ return Object.assign({}, t, { _type: 'transfer' }); }))
+                .sort(function(a, b){ return new Date(b.created_at) - new Date(a.created_at); });
+
+            renderActivityList(merged, 'full-tx-list');
+        } catch (e) {
+            console.error(e);
+            showToast('Failed to load transactions', 'error');
+        }
+    }
+
+    async function saveTransaction() {
+        const amount = parseFloat(document.getElementById('f-amount').value);
+        if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+
+        const payload = {
+            type:        currentType,
+            description: document.getElementById('f-desc').value,
+            account_id:  document.getElementById('f-account').value,
+            amount,
+            category_id: document.getElementById('f-category').value || null
+        };
+        const btn = document.getElementById('btn-save');
+        btn.textContent = 'Saving...'; btn.disabled = true;
+
+        try {
+            const method = editingId ? 'PUT' : 'POST';
+            const url    = editingId ? API + '/transactions/' + editingId : API + '/transactions';
+            const res    = await apiFetch(url, { method, body: JSON.stringify(payload) });
+            if (!res.ok) { const err = await res.json().catch(function(){ return {}; }); throw new Error(err.error || 'Request failed'); }
+            toggleModal(false);
+            showToast(editingId ? 'Transaction updated!' : 'Transaction saved!', 'success');
+            loadDashboard(currentTimeframe);
+            // Refresh goal if the transaction was income (may be SFD/Lalamove)
+            if (currentType === 'income') loadGoalToday();
+        } catch (e) {
+            console.error(e);
+            showToast(e.message || 'Failed to save transaction', 'error');
+        } finally {
+            btn.textContent = 'Save Transaction'; btn.disabled = false;
+        }
+    }
+
+    async function addLiability() {
+        const name     = document.getElementById('l-name').value.trim();
+        const amount   = parseFloat(document.getElementById('l-amount').value);
+        const due_date = document.getElementById('l-due').value || null;
+
+        if (!name)              { showToast('Enter a liability name', 'error'); return; }
+        if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+
+        const btn = document.getElementById('btn-add-liab');
+        btn.textContent = 'Saving...'; btn.disabled = true;
+
+        try {
+            const res = await apiFetch(API + '/liabilities', { method: 'POST', body: JSON.stringify({ name, amount, due_date }) });
+            if (!res.ok) { const err = await res.json().catch(function(){ return {}; }); throw new Error(err.error || 'Failed'); }
+            toggleAddLiability();
+            showToast('Liability added!', 'success');
+            loadAccounts();
+        } catch (e) {
+            showToast(e.message || 'Failed to add liability', 'error');
+        } finally {
+            btn.textContent = 'Save'; btn.disabled = false;
+        }
+    }
+
+    async function deleteLiability(id) {
+        if (!confirm('Remove this liability?')) return;
+        try {
+            const res = await apiFetch(API + '/liabilities/' + id, { method: 'DELETE' });
+            if (!res.ok && res.status !== 204) throw new Error('Delete failed');
+            showToast('Liability removed.', 'success');
+            loadAccounts();
+        } catch (e) {
+            showToast('Failed to remove liability', 'error');
+        }
+    }
+
+    // ── Settings: Shared Helpers ──────────────────────────────────────────────
+    function toggleForm(id) {
+        const el = document.getElementById(id);
+        el.classList.toggle('open');
+    }
+
+    // ── Settings: Accounts ────────────────────────────────────────────────────
+    var _settingsAccounts = [];
+
+    async function loadSettingsAccounts() {
+        try {
+            const res  = await apiFetch(API + '/accounts');
+            _settingsAccounts = res.ok ? await res.json() : [];
+        } catch (e) { _settingsAccounts = []; }
+        renderSettingsAccounts();
+    }
+
+    function renderSettingsAccounts() {
+        const c = document.getElementById('settings-accounts-list');
+        if (!_settingsAccounts.length) {
+            c.innerHTML = '<div class="empty-state" style="padding:16px 0 8px;">No accounts yet. Add one below.</div>';
+            return;
+        }
+        c.innerHTML = _settingsAccounts.map(function(a) {
+            return '<div class="settings-item-card" id="acc-card-' + a.id + '">' +
+                '<div class="settings-item-row">' +
+                    '<div class="settings-item-icon blue"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div>' +
+                    '<div class="settings-item-body"><div class="settings-item-name">' + a.name + '</div><div class="settings-item-sub">' + fmt(a.balance) + '</div></div>' +
+                    '<button class="btn-icon-edit"   onclick="openEditAccount(\'' + a.id + '\')"   title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>' +
+                    '<button class="btn-icon-delete" onclick="deleteAccount(\'' + a.id + '\')"      title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>' +
+                '</div>' +
+                '<div class="settings-edit-form" id="acc-edit-' + a.id + '">' +
+                    '<div class="settings-edit-row">' +
+                        '<div><div style="font-size:0.7rem;font-weight:600;color:var(--text-sub);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.4px;">Name</div>' +
+                        '<input type="text"   class="control-sm" id="ea-name-' + a.id + '" value="' + a.name.replace(/"/g,'&quot;') + '"></div>' +
+                        '<div><div style="font-size:0.7rem;font-weight:600;color:var(--text-sub);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.4px;">Balance</div>' +
+                        '<input type="number" class="control-sm" id="ea-bal-' + a.id + '"  value="' + a.balance + '" step="0.01"></div>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;">' +
+                        '<button class="btn-save-sm"   onclick="saveEditAccount(\'' + a.id + '\')">Save</button>' +
+                        '<button class="btn-cancel-sm" onclick="closeEditAccount(\'' + a.id + '\')">Cancel</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    function openEditAccount(id) {
+        document.querySelectorAll('.settings-edit-form').forEach(function(f){ f.classList.remove('open'); });
+        document.getElementById('acc-edit-' + id).classList.add('open');
+    }
+    function closeEditAccount(id) { document.getElementById('acc-edit-' + id).classList.remove('open'); }
+
+    async function saveEditAccount(id) {
+        const name    = document.getElementById('ea-name-' + id).value.trim();
+        const balance = document.getElementById('ea-bal-' + id).value;
+        if (!name) { showToast('Account name required', 'error'); return; }
+        try {
+            const res = await apiFetch(API + '/accounts/' + id, { method: 'PUT', body: JSON.stringify({ name, balance }) });
+            if (!res.ok) throw new Error((await res.json()).error || 'Update failed');
+            showToast('Account updated!', 'success');
+            await loadSettingsAccounts();
+            await loadDashboard(currentTimeframe); // refresh dashboard balances
+        } catch (e) { showToast(e.message, 'error'); }
+    }
+
+    async function addAccount() {
+        const name    = document.getElementById('na-name').value.trim();
+        const balance = document.getElementById('na-balance').value;
+        if (!name) { showToast('Enter account name', 'error'); return; }
+        const btn = document.getElementById('btn-add-account');
+        btn.textContent = 'Adding...'; btn.disabled = true;
+        try {
+            const res = await apiFetch(API + '/accounts', { method: 'POST', body: JSON.stringify({ name, balance }) });
+            if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+            document.getElementById('na-name').value    = '';
+            document.getElementById('na-balance').value = '';
+            toggleForm('add-account-form');
+            showToast('Account added!', 'success');
+            await loadSettingsAccounts();
+            await loadDashboard(currentTimeframe);
+        } catch (e) { showToast(e.message, 'error'); }
+        finally { btn.textContent = 'Add Account'; btn.disabled = false; }
+    }
+
+    async function deleteAccount(id) {
+        const acc = _settingsAccounts.find(function(a){ return a.id === id; });
+        if (!confirm('Delete "' + (acc ? acc.name : 'this account') + '"? This cannot be undone.')) return;
+        try {
+            const res = await apiFetch(API + '/accounts/' + id, { method: 'DELETE' });
+            if (!res.ok && res.status !== 204) throw new Error('Delete failed');
+            showToast('Account deleted.', 'success');
+            await loadSettingsAccounts();
+            await loadDashboard(currentTimeframe);
+        } catch (e) { showToast(e.message, 'error'); }
+    }
+
+    // ── Settings: Categories ──────────────────────────────────────────────────
+    async function loadSettingsCategories() {
+        try {
+            const res = await apiFetch(API + '/categories');
+            _categories = res.ok ? await res.json() : [];
+        } catch (e) { _categories = []; }
+        renderSettingsCategories();
+    }
+
+    function renderSettingsCategories() {
+        const c = document.getElementById('settings-categories-list');
+        if (!_categories.length) {
+            c.innerHTML = '<div class="empty-state" style="padding:16px 0 8px;">No categories yet. Add one below.</div>';
+            return;
+        }
+        c.innerHTML = _categories.map(function(cat) {
+            const badge = '<span class="cat-badge ' + cat.type + '">' + cat.type + '</span>';
+            return '<div class="settings-item-card" id="cat-card-' + cat.id + '">' +
+                '<div class="settings-item-row">' +
+                    '<div class="settings-item-body"><div class="settings-item-name">' + cat.name + '</div><div style="margin-top:3px;">' + badge + '</div></div>' +
+                    '<button class="btn-icon-edit"   onclick="openEditCategory(\'' + cat.id + '\')"  title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>' +
+                    '<button class="btn-icon-delete" onclick="deleteCategory(\'' + cat.id + '\')"   title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>' +
+                '</div>' +
+                '<div class="settings-edit-form" id="cat-edit-' + cat.id + '">' +
+                    '<div class="settings-two-col">' +
+                        '<div><div style="font-size:0.7rem;font-weight:600;color:var(--text-sub);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.4px;">Name</div>' +
+                        '<input type="text" class="control-sm" id="ec-name-' + cat.id + '" value="' + cat.name.replace(/"/g,'&quot;') + '"></div>' +
+                        '<div><div style="font-size:0.7rem;font-weight:600;color:var(--text-sub);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.4px;">Type</div>' +
+                        '<select class="control-sm" id="ec-type-' + cat.id + '">' +
+                            '<option value="expense"' + (cat.type==='expense'?' selected':'') + '>Expense</option>' +
+                            '<option value="income"'  + (cat.type==='income'?' selected':'')  + '>Income</option>' +
+                            '<option value="both"'    + (cat.type==='both'?' selected':'')    + '>Both</option>' +
+                        '</select></div>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;">' +
+                        '<button class="btn-save-sm"   onclick="saveEditCategory(\'' + cat.id + '\')">Save</button>' +
+                        '<button class="btn-cancel-sm" onclick="closeEditCategory(\'' + cat.id + '\')">Cancel</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    function openEditCategory(id) {
+        document.querySelectorAll('.settings-edit-form').forEach(function(f){ f.classList.remove('open'); });
+        document.getElementById('cat-edit-' + id).classList.add('open');
+    }
+    function closeEditCategory(id) { document.getElementById('cat-edit-' + id).classList.remove('open'); }
+
+    async function saveEditCategory(id) {
+        const name = document.getElementById('ec-name-' + id).value.trim();
+        const type = document.getElementById('ec-type-' + id).value;
+        if (!name) { showToast('Category name required', 'error'); return; }
+        try {
+            const res = await apiFetch(API + '/categories/' + id, { method: 'PUT', body: JSON.stringify({ name, type }) });
+            if (!res.ok) throw new Error((await res.json()).error || 'Update failed');
+            showToast('Category updated!', 'success');
+            await loadSettingsCategories();
+        } catch (e) { showToast(e.message, 'error'); }
+    }
+
+    async function addCategory() {
+        const name = document.getElementById('nc-name').value.trim();
+        const type = document.getElementById('nc-type').value;
+        if (!name) { showToast('Enter category name', 'error'); return; }
+        const btn = document.getElementById('btn-add-category');
+        btn.textContent = 'Adding...'; btn.disabled = true;
+        try {
+            const res = await apiFetch(API + '/categories', { method: 'POST', body: JSON.stringify({ name, type }) });
+            if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+            document.getElementById('nc-name').value = '';
+            document.getElementById('nc-type').value = 'expense';
+            toggleForm('add-category-form');
+            showToast('Category added!', 'success');
+            await loadSettingsCategories();
+        } catch (e) { showToast(e.message, 'error'); }
+        finally { btn.textContent = 'Add Category'; btn.disabled = false; }
+    }
+
+    async function deleteCategory(id) {
+        const cat = _categories.find(function(c){ return c.id === id; });
+        if (!confirm('Delete "' + (cat ? cat.name : 'this category') + '"?')) return;
+        try {
+            const res = await apiFetch(API + '/categories/' + id, { method: 'DELETE' });
+            if (!res.ok && res.status !== 204) throw new Error('Delete failed');
+            showToast('Category deleted.', 'success');
+            await loadSettingsCategories();
+        } catch (e) { showToast(e.message, 'error'); }
+    }
+
+    // ── Category Dropdown in Transaction Modal ────────────────────────────────
+    async function loadCategories() {
+        try {
+            const res = await apiFetch(API + '/categories');
+            _categories = res.ok ? await res.json() : [];
+        } catch (e) { _categories = []; }
+        refreshCategoryDropdown(currentType);
+    }
+
+    function refreshCategoryDropdown(type) {
+        const sel     = document.getElementById('f-category');
+        const current = sel.value;
+        const filtered = _categories.filter(function(c){
+            return c.type === type || c.type === 'both';
+        });
+        sel.innerHTML = '<option value="">— No category —</option>' +
+            filtered.map(function(c){
+                return '<option value="' + c.id + '">' + c.name + '</option>';
+            }).join('');
+        sel.value = current; // restore if still valid
+    }
+
+    // ── Transfer Modal ────────────────────────────────────────────────────────
+    function openTransferModal() {
+        if (!_accounts || _accounts.length < 2) {
+            showToast('You need at least 2 accounts to transfer.', 'error');
+            return;
+        }
+        populateTransferDropdowns();
+        document.getElementById('t-amount').value = '';
+        document.getElementById('t-desc').value   = '';
+        document.getElementById('transfer-same-error').style.display = 'none';
+        document.getElementById('transfer-modal').classList.add('active');
+    }
+
+    function closeTransferModal() {
+        document.getElementById('transfer-modal').classList.remove('active');
+    }
+
+    function populateTransferDropdowns() {
+        var opts = _accounts.map(function(a){
+            return '<option value="' + a.id + '">' + a.name + ' (' + fmt(a.balance) + ')</option>';
+        }).join('');
+        document.getElementById('t-from').innerHTML = opts;
+        document.getElementById('t-to').innerHTML   = opts;
+        // Default: first account → second account
+        if (_accounts.length >= 2) {
+            document.getElementById('t-from').value = _accounts[0].id;
+            document.getElementById('t-to').value   = _accounts[1].id;
+        }
+        document.getElementById('transfer-same-error').style.display = 'none';
+    }
+
+    function validateTransferAccounts() {
+        var same = document.getElementById('t-from').value === document.getElementById('t-to').value;
+        document.getElementById('transfer-same-error').style.display = same ? 'block' : 'none';
+        document.getElementById('btn-transfer').disabled = same;
+    }
+
+    async function saveTransfer() {
+        var fromId = document.getElementById('t-from').value;
+        var toId   = document.getElementById('t-to').value;
+        var amount = parseFloat(document.getElementById('t-amount').value);
+        var desc   = document.getElementById('t-desc').value.trim();
+
+        if (fromId === toId) { showToast('Source and destination must differ', 'error'); return; }
+        if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+
+        var btn = document.getElementById('btn-transfer');
+        btn.textContent = 'Transferring...'; btn.disabled = true;
+
+        try {
+            var res = await apiFetch(API + '/transfers', {
+                method: 'POST',
+                body:   JSON.stringify({ from_account_id: fromId, to_account_id: toId, amount: amount, description: desc })
+            });
+            var data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Transfer failed');
+
+            closeTransferModal();
+            showToast('Transfer complete!', 'success');
+            // Refresh accounts (updates balances) and dashboard (adds to recent activity)
+            await Promise.all([loadAccounts(), loadDashboard(currentTimeframe)]);
+        } catch (e) {
+            showToast(e.message || 'Transfer failed', 'error');
+        } finally {
+            btn.textContent = 'Transfer Funds'; btn.disabled = false;
+        }
+    }
+
+    // ── Today's Goal ──────────────────────────────────────────────────────────
+    async function loadGoalToday() {
+        try {
+            var res  = await apiFetch(API + '/goal/today');
+            if (!res.ok) return;
+            var data = await res.json();
+            renderGoal(data);
+        } catch (e) { /* silently ignore — goal is non-critical */ }
+    }
+
+    function renderGoal(data) {
+        var setEl   = document.getElementById('goal-display-set');
+        var unsetEl = document.getElementById('goal-display-unset');
+        if (!setEl || !unsetEl) return;
+
+        if (!data || data.daily_goal <= 0) {
+            setEl.style.display   = 'none';
+            unsetEl.style.display = 'block';
+            return;
+        }
+
+        setEl.style.display   = 'block';
+        unsetEl.style.display = 'none';
+
+        document.getElementById('goal-target-val').textContent   = fmt(data.daily_goal);
+        document.getElementById('goal-earned-val').textContent   = fmt(data.earned_today) + ' earned';
+        document.getElementById('goal-remaining-val').textContent = data.done
+            ? '&#x2714; Goal reached!'
+            : fmt(data.remaining) + ' left';
+        if (data.done) {
+            document.getElementById('goal-remaining-val').innerHTML = '&#x2714; Goal reached!';
+            document.getElementById('goal-remaining-val').style.color = 'var(--success)';
+        } else {
+            document.getElementById('goal-remaining-val').style.color = 'var(--muted)';
+        }
+
+        var fill = document.getElementById('goal-progress-fill');
+        fill.style.width = data.progress + '%';
+        fill.className   = 'goal-progress-fill' + (data.done ? ' complete' : '');
+    }
+
+    // ── Settings: Daily Goal ──────────────────────────────────────────────────
+    async function loadSettingsGoal() {
+        try {
+            var res  = await apiFetch(API + '/settings');
+            var data = res.ok ? await res.json() : { daily_goal: 0 };
+            var goal = parseFloat(data.daily_goal) || 0;
+
+            document.getElementById('goal-current-display').textContent =
+                goal > 0 ? fmt(goal) + ' per day' : 'Not set';
+            document.getElementById('goal-input').value = goal > 0 ? goal : '';
+
+            // Update the profile sub-label too
+            var sub = document.getElementById('profile-goal-sub');
+            if (sub) sub.textContent = goal > 0 ? 'Current: ' + fmt(goal) + ' / day' : 'Set your daily earnings target';
+        } catch (e) { /* ignore */ }
+    }
+
+    async function saveGoalSetting(remove) {
+        var goal = remove ? 0 : parseFloat(document.getElementById('goal-input').value) || 0;
+        if (!remove && goal < 0) { showToast('Enter a valid amount', 'error'); return; }
+
+        var btn = document.getElementById('btn-save-goal');
+        btn.textContent = 'Saving...'; btn.disabled = true;
+
+        try {
+            var res = await apiFetch(API + '/settings', {
+                method: 'PUT', body: JSON.stringify({ daily_goal: goal })
+            });
+            if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+            showToast(remove ? 'Goal removed.' : 'Daily goal saved!', 'success');
+            await loadSettingsGoal();  // refresh the settings view
+            loadGoalToday();           // refresh the card in Accounts tab
+        } catch (e) {
+            showToast(e.message || 'Failed to save goal', 'error');
+        } finally {
+            btn.textContent = 'Save Daily Goal'; btn.disabled = false;
+        }
+    }
+
+    function rotateDailyQuote() {
+        const q = financeQuotes[Math.floor(Math.random() * financeQuotes.length)];
+        document.getElementById('txt-quote').textContent = '"' + q.text + '"';
+        document.getElementById('lnk-quote').href = q.url;
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    async function initApp() {
+        setTodayLabel();
+        rotateDailyQuote();
+
+        if (!authToken) { showAuthScreen('signin'); return; }
+
+        try {
+            const res  = await fetch(API + '/auth/me', {
+                headers: { 'Authorization': 'Bearer ' + authToken }
+            });
+            const data = await res.json();
+            if (!data.user) {
+                authToken = null; localStorage.removeItem('ft_token');
+                showAuthScreen('signin'); return;
+            }
+            currentUser = data.user;
+            showMainApp();
+        } catch (e) {
+            showAuthScreen('signin');
+        }
+    }
+
+    initApp();
+</script>
+</body>
+</html>

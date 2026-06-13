@@ -1,0 +1,10 @@
+◇ injected env (3) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+Finance Tracker running on http://localhost:3000
+[TypeError: fetch failed] {
+  [cause]: Error: read ECONNABORTED
+      at TLSWrap.onStreamRead (node:internal/stream_base_commons:216:20) {
+    errno: -103,
+    code: 'ECONNABORTED',
+    syscall: 'read'
+  }
+}
