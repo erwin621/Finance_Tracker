@@ -72,6 +72,76 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 //
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ─── CASH FLOW & FINANCIAL PLANNING MODULE — MIGRATION (additive, run once) ───
+//
+//  Everything below is additive: new optional columns and new tables.
+//  Nothing here removes or renames an existing column/table, so every
+//  existing endpoint keeps working exactly as it did before.
+//
+//  -- 1. Track "sites completed" on Primary Job income entries, and let an
+//        expense transaction optionally link back to the liability it pays.
+//  ALTER TABLE transactions ADD COLUMN IF NOT EXISTS sites_completed INTEGER;
+//  ALTER TABLE transactions ADD COLUMN IF NOT EXISTS liability_id    UUID;
+//
+//  -- 2. Debt Manager fields on the existing liabilities table.
+//  ALTER TABLE liabilities ADD COLUMN IF NOT EXISTS original_amount DECIMAL(12,2);
+//  ALTER TABLE liabilities ADD COLUMN IF NOT EXISTS monthly_payment DECIMAL(12,2);
+//  ALTER TABLE liabilities ADD COLUMN IF NOT EXISTS due_day         INTEGER;  -- 1-31, for recurring monthly due dates
+//
+//  -- 3. Cash-flow planning preferences on the existing user_settings table.
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS daily_family_budget DECIMAL(12,2) DEFAULT 700;
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS daily_fuel_budget   DECIMAL(12,2) DEFAULT 250;
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS payroll_days        INTEGER[]     DEFAULT ARRAY[15,30];
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS expected_payroll    DECIMAL(12,2) DEFAULT 6750;
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS currency            TEXT          DEFAULT 'PHP';
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS notification_prefs  JSONB         DEFAULT
+//    '{"payroll_tomorrow":true,"fuel_low":true,"buffer_goal":true,"debt_due":true,"cash_low":true,"financial_risk":true}'::jsonb;
+//
+//  -- 4. Goals — powers BOTH the Operating Buffer and the Goal Planner.
+//        (type = 'buffer' for the operating-buffer milestones, 'savings' for everything else)
+//  CREATE TABLE IF NOT EXISTS goals (
+//    id             UUID          DEFAULT gen_random_uuid() PRIMARY KEY,
+//    user_id        UUID          NOT NULL,
+//    name           TEXT          NOT NULL,
+//    type           TEXT          NOT NULL DEFAULT 'savings',  -- 'buffer' | 'savings'
+//    target_amount  DECIMAL(12,2) NOT NULL,
+//    current_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+//    target_date    DATE,
+//    created_at     TIMESTAMPTZ   DEFAULT now()
+//  );
+//
+//  -- 5. Goal contribution ledger — powers the Calendar view and automatic
+//        "estimated completion date" projections (no manual math required).
+//  CREATE TABLE IF NOT EXISTS goal_contributions (
+//    id         UUID          DEFAULT gen_random_uuid() PRIMARY KEY,
+//    goal_id    UUID          NOT NULL,
+//    user_id    UUID          NOT NULL,
+//    amount     DECIMAL(12,2) NOT NULL,
+//    created_at TIMESTAMPTZ   DEFAULT now()
+//  );
+//
+//  -- 6. Fuel Tracker log.
+//  CREATE TABLE IF NOT EXISTS fuel_logs (
+//    id         UUID          DEFAULT gen_random_uuid() PRIMARY KEY,
+//    user_id    UUID          NOT NULL,
+//    log_date   DATE          NOT NULL DEFAULT CURRENT_DATE,
+//    liters     DECIMAL(8,2),
+//    cost       DECIMAL(10,2) NOT NULL CHECK (cost > 0),
+//    odometer   DECIMAL(10,1),
+//    station    TEXT,
+//    notes      TEXT,
+//    created_at TIMESTAMPTZ   DEFAULT now()
+//  );
+//
+//  -- 7. Optional FK references (recommended).
+//  ALTER TABLE goals              ADD CONSTRAINT fk_goal_user FOREIGN KEY (user_id)     REFERENCES auth.users(id) ON DELETE CASCADE;
+//  ALTER TABLE goal_contributions ADD CONSTRAINT fk_gc_user   FOREIGN KEY (user_id)     REFERENCES auth.users(id) ON DELETE CASCADE;
+//  ALTER TABLE goal_contributions ADD CONSTRAINT fk_gc_goal   FOREIGN KEY (goal_id)     REFERENCES goals(id)      ON DELETE CASCADE;
+//  ALTER TABLE fuel_logs          ADD CONSTRAINT fk_fuel_user FOREIGN KEY (user_id)     REFERENCES auth.users(id) ON DELETE CASCADE;
+//  ALTER TABLE transactions       ADD CONSTRAINT fk_tx_liab   FOREIGN KEY (liability_id) REFERENCES liabilities(id) ON DELETE SET NULL;
+//
+// ──────────────────────────────────────────────────────────────────────────────
+
 // ── Auth Middleware ───────────────────────────────────────────────────────────
 async function requireAuth(req, res, next) {
     const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
@@ -264,7 +334,7 @@ app.get('/api/transactions', requireAuth, async (req, res) => {
 app.post('/api/transactions', requireAuth, async (req, res) => {
     try {
         const uid = req.user.id;
-        const { account_id, type, amount, description, category_id } = req.body;
+        const { account_id, type, amount, description, category_id, sites_completed, liability_id } = req.body;
 
         if (!account_id || !type || !amount) return res.status(400).json({ error: 'Missing required fields: account_id, type, amount' });
         if (!['income', 'expense'].includes(type)) return res.status(400).json({ error: 'type must be "income" or "expense"' });
@@ -272,6 +342,10 @@ app.post('/api/transactions', requireAuth, async (req, res) => {
 
         const payload = { account_id, type, amount: parseFloat(amount), description, user_id: uid };
         if (category_id) payload.category_id = category_id;
+        // Cash Flow module additions — both optional. sites_completed powers Income Tracking's
+        // Primary Job quick-log; liability_id links a Debt Manager payment back to its debt.
+        if (sites_completed !== undefined && sites_completed !== '' && sites_completed !== null) payload.sites_completed = parseInt(sites_completed);
+        if (liability_id) payload.liability_id = liability_id;
 
         const { data, error } = await supabase.from('transactions').insert([payload]).select();
         if (error) throw error;
@@ -285,7 +359,7 @@ app.put('/api/transactions/:id', requireAuth, async (req, res) => {
     try {
         const uid = req.user.id;
         const { id } = req.params;
-        const { account_id, type, amount, description, category_id } = req.body;
+        const { account_id, type, amount, description, category_id, sites_completed, liability_id } = req.body;
 
         if (!account_id || !type || !amount) return res.status(400).json({ error: 'Missing required fields' });
         if (!['income', 'expense'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
@@ -293,6 +367,8 @@ app.put('/api/transactions/:id', requireAuth, async (req, res) => {
 
         const updates = { account_id, type, amount: parseFloat(amount), description };
         if (category_id !== undefined) updates.category_id = category_id || null;
+        if (sites_completed !== undefined) updates.sites_completed = (sites_completed === '' || sites_completed === null) ? null : parseInt(sites_completed);
+        if (liability_id !== undefined) updates.liability_id = liability_id || null;
 
         const { data, error } = await supabase.from('transactions')
             .update(updates).eq('id', id).eq('user_id', uid).select();
@@ -481,12 +557,17 @@ app.get('/api/liabilities', requireAuth, async (req, res) => {
 app.post('/api/liabilities', requireAuth, async (req, res) => {
     try {
         const uid = req.user.id;
-        const { name, amount, due_date } = req.body;
+        const { name, amount, due_date, original_amount, monthly_payment, due_day } = req.body;
         if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
         if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'amount must be a positive number' });
 
         const payload = { name: name.trim(), amount: parseFloat(amount), user_id: uid };
         if (due_date) payload.due_date = due_date;
+        // Debt Manager additions — all optional, backward compatible.
+        payload.original_amount = (original_amount !== undefined && original_amount !== '' && original_amount !== null)
+            ? parseFloat(original_amount) : parseFloat(amount);
+        if (monthly_payment !== undefined && monthly_payment !== '' && monthly_payment !== null) payload.monthly_payment = parseFloat(monthly_payment);
+        if (due_day !== undefined && due_day !== '' && due_day !== null) payload.due_day = parseInt(due_day);
 
         const { data, error } = await supabase.from('liabilities').insert([payload]).select();
         if (error) throw error;
@@ -630,7 +711,21 @@ app.get('/api/settings', requireAuth, async (req, res) => {
         const { data, error } = await supabase
             .from('user_settings').select('*').eq('user_id', req.user.id).single();
         if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows
-        res.json(data || { daily_goal: 0 });
+        const base = data || {};
+        res.json({
+            daily_goal:          parseFloat(base.daily_goal) || 0,
+            // Cash Flow module additions — defaulted so older rows (created before the
+            // migration ran) behave exactly like a freshly-seeded settings row.
+            daily_family_budget: base.daily_family_budget != null ? parseFloat(base.daily_family_budget) : 700,
+            daily_fuel_budget:   base.daily_fuel_budget   != null ? parseFloat(base.daily_fuel_budget)   : 250,
+            payroll_days:        (Array.isArray(base.payroll_days) && base.payroll_days.length) ? base.payroll_days : [15, 30],
+            expected_payroll:    base.expected_payroll != null ? parseFloat(base.expected_payroll) : 6750,
+            currency:            base.currency || 'PHP',
+            notification_prefs:  base.notification_prefs || {
+                payroll_tomorrow: true, fuel_low: true, buffer_goal: true,
+                debt_due: true, cash_low: true, financial_risk: true
+            }
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -640,10 +735,20 @@ app.put('/api/settings', requireAuth, async (req, res) => {
         const daily_goal = parseFloat(req.body.daily_goal) || 0;
         if (daily_goal < 0) return res.status(400).json({ error: 'daily_goal must be 0 or positive' });
 
+        const payload = { user_id: uid, daily_goal, updated_at: new Date().toISOString() };
+
+        // Cash Flow module additions — all optional so existing callers that only send
+        // { daily_goal } keep working exactly as before.
+        if (req.body.daily_family_budget !== undefined) payload.daily_family_budget = parseFloat(req.body.daily_family_budget) || 0;
+        if (req.body.daily_fuel_budget   !== undefined) payload.daily_fuel_budget   = parseFloat(req.body.daily_fuel_budget)   || 0;
+        if (req.body.payroll_days        !== undefined) payload.payroll_days        = (req.body.payroll_days || []).map(Number).filter(n => n >= 1 && n <= 31);
+        if (req.body.expected_payroll    !== undefined) payload.expected_payroll    = parseFloat(req.body.expected_payroll) || 0;
+        if (req.body.currency            !== undefined) payload.currency            = req.body.currency || 'PHP';
+        if (req.body.notification_prefs  !== undefined) payload.notification_prefs  = req.body.notification_prefs;
+
         const { data, error } = await supabase
             .from('user_settings')
-            .upsert({ user_id: uid, daily_goal, updated_at: new Date().toISOString() },
-                    { onConflict: 'user_id' })
+            .upsert(payload, { onConflict: 'user_id' })
             .select();
         if (error) throw error;
         res.json(data[0]);
@@ -708,6 +813,799 @@ app.get('/api/unclaimed', requireAuth, async (req, res) => {
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ███ CASH FLOW & FINANCIAL PLANNING MODULE ███
+// Everything below is new and additive — it reuses the existing accounts,
+// transactions, categories and liabilities tables wherever practical, and
+// only introduces new tables (goals, goal_contributions, fuel_logs) where a
+// genuinely new concept needed one. No existing route above this point was
+// removed; a few were extended with optional fields (see comments above).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Shared Helpers ────────────────────────────────────────────────────────────
+async function getCashflowSettings(uid) {
+    const { data } = await supabase.from('user_settings').select('*').eq('user_id', uid).single();
+    const base = data || {};
+    return {
+        daily_goal:          parseFloat(base.daily_goal) || 0,
+        daily_family_budget: base.daily_family_budget != null ? parseFloat(base.daily_family_budget) : 700,
+        daily_fuel_budget:   base.daily_fuel_budget   != null ? parseFloat(base.daily_fuel_budget)   : 250,
+        payroll_days:        (Array.isArray(base.payroll_days) && base.payroll_days.length) ? base.payroll_days.map(Number) : [15, 30],
+        expected_payroll:    base.expected_payroll != null ? parseFloat(base.expected_payroll) : 6750,
+        currency:            base.currency || 'PHP',
+        notification_prefs:  base.notification_prefs || {
+            payroll_tomorrow: true, fuel_low: true, buffer_goal: true,
+            debt_due: true, cash_low: true, financial_risk: true
+        }
+    };
+}
+
+function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); } // m is 0-indexed
+function buildPayrollDate(y, m, day) {
+    const d = Math.min(day, daysInMonth(y, m));
+    return new Date(y, m, d, 0, 0, 0, 0);
+}
+// Next payroll date on/after `from`, given a list of days-of-month (e.g. [15, 30]).
+function getNextPayroll(payrollDays, from) {
+    const sorted = [...payrollDays].sort((a, b) => a - b);
+    let y = from.getFullYear(), m = from.getMonth();
+    for (let i = 0; i < 6; i++) {
+        for (const day of sorted) {
+            const d = buildPayrollDate(y, m, day);
+            if (d >= from) return d;
+        }
+        m++; if (m > 11) { m = 0; y++; }
+    }
+    return null;
+}
+function isWorkday(d) { const day = d.getDay(); return day >= 1 && day <= 5; } // Mon–Fri
+function monthAbbr(m) { return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m, 10) - 1]; }
+function ymd(d) { return new Date(d).toISOString().slice(0, 10); }
+
+// Finds (case-insensitively) a category by exact name for the current user.
+async function findCategoryByName(uid, name) {
+    const { data } = await supabase.from('categories').select('*').eq('user_id', uid);
+    return (data || []).find(c => (c.name || '').trim().toLowerCase() === name.toLowerCase()) || null;
+}
+
+// ── DEFAULT CATEGORIES ────────────────────────────────────────────────────────
+// Idempotent: only inserts categories that don't already exist by name.
+// Called automatically by the client when the Cash Flow hub is first opened.
+app.post('/api/categories/seed-defaults', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const defaults = [
+            { name: 'Primary Job',     type: 'income'  },
+            { name: 'SFD',             type: 'income'  },
+            { name: 'Lalamove',        type: 'income'  },
+            { name: 'Other Income',    type: 'income'  },
+            { name: 'Family Expenses', type: 'expense' },
+            { name: 'Fuel',            type: 'expense' },
+            { name: 'Debt Payments',   type: 'expense' },
+            { name: 'Food',            type: 'expense' },
+            { name: 'Utilities',       type: 'expense' },
+            { name: 'Transportation',  type: 'expense' },
+            { name: 'Medical',         type: 'expense' },
+            { name: 'Other',           type: 'expense' }
+        ];
+        const { data: existing } = await supabase.from('categories').select('name').eq('user_id', uid);
+        const existingNames = new Set((existing || []).map(c => (c.name || '').trim().toLowerCase()));
+        const toInsert = defaults
+            .filter(d => !existingNames.has(d.name.toLowerCase()))
+            .map(d => Object.assign({}, d, { user_id: uid }));
+        if (toInsert.length) {
+            const { error } = await supabase.from('categories').insert(toInsert);
+            if (error) throw error;
+        }
+        res.json({ added: toInsert.length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CASH FLOW FORECAST ────────────────────────────────────────────────────────
+// Single endpoint that powers the Dashboard KPI cards + the Forecast section.
+// Every figure here is derived automatically — no manual calculation needed.
+app.get('/api/cashflow/forecast', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const settings = await getCashflowSettings(uid);
+
+        const [{ data: accounts }, { data: liabilities }, { data: goals }, { data: cats }] = await Promise.all([
+            supabase.from('accounts').select('*').eq('user_id', uid),
+            supabase.from('liabilities').select('*').eq('user_id', uid),
+            supabase.from('goals').select('*').eq('user_id', uid),
+            supabase.from('categories').select('id, name').eq('user_id', uid)
+        ]);
+
+        const availableCash = (accounts || []).reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
+        const remainingDebt = (liabilities || []).reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+
+        const bufferGoals = (goals || []).filter(g => g.type === 'buffer');
+        const currentBuffer = bufferGoals.reduce((s, g) => s + (parseFloat(g.current_amount) || 0), 0);
+        const bufferTarget  = bufferGoals.reduce((s, g) => s + (parseFloat(g.target_amount)  || 0), 0);
+        const remainingBufferGoal = Math.max(0, bufferTarget - currentBuffer);
+
+        const now = new Date(); now.setHours(0, 0, 0, 0);
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+        const { data: monthTx } = await supabase.from('transactions').select('type, amount')
+            .eq('user_id', uid).gte('created_at', monthStart.toISOString()).lte('created_at', monthEnd.toISOString());
+
+        let monthlyIncome = 0, monthlyExpense = 0;
+        (monthTx || []).forEach(t => {
+            const a = parseFloat(t.amount) || 0;
+            if (t.type === 'income') monthlyIncome += a; else monthlyExpense += a;
+        });
+        const netCashFlow = monthlyIncome - monthlyExpense;
+
+        // Trailing-30-day average daily variable income (SFD + Lalamove) — used to
+        // project cash flow forward without requiring the user to type in a forecast.
+        const variableCatIds = (cats || [])
+            .filter(c => /^(sfd|lalamove)$/i.test((c.name || '').trim()))
+            .map(c => c.id);
+        const thirtyAgo = new Date(now); thirtyAgo.setDate(thirtyAgo.getDate() - 30);
+        let avgDailyVariableIncome = 0;
+        if (variableCatIds.length) {
+            const { data: varTx } = await supabase.from('transactions').select('amount')
+                .eq('user_id', uid).eq('type', 'income').in('category_id', variableCatIds)
+                .gte('created_at', thirtyAgo.toISOString());
+            const total = (varTx || []).reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+            avgDailyVariableIncome = total / 30;
+        }
+
+        const nextPayroll = getNextPayroll(settings.payroll_days, now);
+        const daysUntilPayroll = nextPayroll ? Math.round((nextPayroll - now) / 86400000) : null;
+
+        const dailyRequirement = (date) => settings.daily_family_budget + (isWorkday(date) ? settings.daily_fuel_budget : 0);
+
+        // Day-by-day simulation: walk forward from today, applying the projected
+        // variable income (workdays only) against the daily requirement, to find
+        // (a) the net position right before payroll, and (b) the first day cash
+        // would go negative, if any, within a 90-day horizon.
+        const horizon = Math.min(90, Math.max(daysUntilPayroll || 1, 1));
+        let totalRequiredUntilPayroll = 0, totalIncomeUntilPayroll = 0;
+        let simCash = availableCash, runOutDay = null;
+        for (let i = 0; i < 90; i++) {
+            const d = new Date(now); d.setDate(d.getDate() + i);
+            const req = dailyRequirement(d);
+            const inc = isWorkday(d) ? avgDailyVariableIncome : 0;
+            if (i < horizon) { totalRequiredUntilPayroll += req; totalIncomeUntilPayroll += inc; }
+            simCash += inc - req;
+            if (runOutDay === null && simCash < 0) runOutDay = i + 1;
+            if (i >= horizon - 1 && runOutDay !== null) break;
+        }
+
+        const cashRemainingBeforeNextPayroll = availableCash - totalRequiredUntilPayroll + totalIncomeUntilPayroll;
+        const expectedBufferGrowth = Math.max(0, totalIncomeUntilPayroll - totalRequiredUntilPayroll);
+        const expectedSurplus = cashRemainingBeforeNextPayroll + (nextPayroll ? settings.expected_payroll : 0) - dailyRequirement(nextPayroll || now);
+
+        const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+        const todaysAvailableCash = availableCash;
+        const tomorrowsRequiredCash = dailyRequirement(tomorrow);
+        const dailyCashRequirement  = dailyRequirement(now);
+
+        let health = 'green';
+        let healthMessage = 'Cash is sufficient.';
+        if (runOutDay !== null && daysUntilPayroll !== null && runOutDay <= daysUntilPayroll) {
+            health = 'red';
+            healthMessage = 'Risk of running out of cash before your next payroll.';
+        } else if (cashRemainingBeforeNextPayroll < dailyCashRequirement * 2) {
+            health = 'yellow';
+            healthMessage = 'Cash is tight before your next payroll — monitor spending.';
+        }
+
+        res.json({
+            kpis: {
+                availableCash, currentBuffer, remainingBufferGoal, remainingDebt,
+                nextPayrollDate: nextPayroll ? ymd(nextPayroll) : null,
+                daysUntilPayroll,
+                fuelBudget: settings.daily_fuel_budget,
+                dailyCashRequirement,
+                monthlyIncome, monthlyExpense, netCashFlow
+            },
+            forecast: {
+                todaysAvailableCash, tomorrowsRequiredCash,
+                cashRemainingBeforeNextPayroll,
+                estimatedDaysUntilCashRunsOut: runOutDay,
+                expectedBufferGrowth, expectedSurplus,
+                avgDailyVariableIncome
+            },
+            health, healthMessage,
+            settings
+        });
+    } catch (e) {
+        console.error('Forecast error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── PAYROLL PLANNER ───────────────────────────────────────────────────────────
+app.get('/api/cashflow/payroll', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const settings = await getCashflowSettings(uid);
+        const now = new Date(); now.setHours(0, 0, 0, 0);
+        const sorted = [...settings.payroll_days].sort((a, b) => a - b);
+
+        const nextPayroll = getNextPayroll(sorted, now);
+        const daysUntilPayroll = nextPayroll ? Math.round((nextPayroll - now) / 86400000) : null;
+
+        // Previous payroll date (start of the current pay period).
+        const candidates = [];
+        for (let off = -2; off <= 0; off++) {
+            const mm = now.getMonth() + off;
+            const yy = now.getFullYear() + Math.floor(mm / 12);
+            const adjM = ((mm % 12) + 12) % 12;
+            sorted.forEach(day => candidates.push(buildPayrollDate(yy, adjM, day)));
+        }
+        candidates.sort((a, b) => a - b);
+        const past = candidates.filter(d => d < now);
+        const periodStart = past.length ? past[past.length - 1] : new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const pjCat = await findCategoryByName(uid, 'Primary Job');
+
+        let actualPayroll = 0, history = [];
+        if (pjCat) {
+            const { data: pjTx } = await supabase.from('transactions').select('amount, created_at')
+                .eq('user_id', uid).eq('type', 'income').eq('category_id', pjCat.id)
+                .order('created_at', { ascending: false });
+
+            (pjTx || []).forEach(t => {
+                const d = new Date(t.created_at);
+                if (d >= periodStart && d <= now) actualPayroll += parseFloat(t.amount) || 0;
+            });
+
+            const periods = {};
+            (pjTx || []).forEach(t => {
+                const d = new Date(t.created_at);
+                const half = d.getDate() <= 15 ? '1' : '2';
+                const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + half;
+                periods[key] = (periods[key] || 0) + (parseFloat(t.amount) || 0);
+            });
+            history = Object.keys(periods)
+                .sort((a, b) => b.localeCompare(a))
+                .slice(0, 6)
+                .map(k => {
+                    const [y, m, half] = k.split('-');
+                    return { period: k, label: (half === '1' ? '1st–15th ' : '16th–end ') + monthAbbr(m) + ' ' + y, amount: periods[k] };
+                });
+        }
+
+        const recentAmounts = history.slice(0, 3).map(h => h.amount).filter(a => a > 0);
+        const expectedPayroll = recentAmounts.length
+            ? recentAmounts.reduce((s, a) => s + a, 0) / recentAmounts.length
+            : settings.expected_payroll;
+
+        res.json({
+            nextPayrollDate: nextPayroll ? ymd(nextPayroll) : null,
+            daysUntilPayroll,
+            periodStart: ymd(periodStart),
+            expectedPayroll, actualPayroll, history,
+            payrollDays: sorted
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GOALS (Operating Buffer + Goal Planner) ───────────────────────────────────
+// type = 'buffer' for the Operating Buffer milestones, 'savings' for the Goal Planner.
+app.get('/api/goals', requireAuth, async (req, res) => {
+    try {
+        let q = supabase.from('goals').select('*').eq('user_id', req.user.id).order('created_at', { ascending: true });
+        if (req.query.type) q = q.eq('type', req.query.type);
+        const { data: goals, error } = await q;
+        if (error) throw error;
+
+        const { data: contributions } = await supabase.from('goal_contributions')
+            .select('goal_id, amount, created_at').eq('user_id', req.user.id);
+
+        const enriched = (goals || []).map(g => {
+            const target  = parseFloat(g.target_amount)  || 0;
+            const current = parseFloat(g.current_amount) || 0;
+            const remaining = Math.max(0, target - current);
+            const progress  = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+
+            // Estimated completion date — derived automatically from the goal's own
+            // contribution history (average ₱/day between first and last deposit).
+            const gc = (contributions || [])
+                .filter(c => c.goal_id === g.id && parseFloat(c.amount) > 0)
+                .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            let estimatedCompletionDate = null, daysRemaining = null;
+            if (gc.length >= 2 && remaining > 0) {
+                const spanDays = (new Date(gc[gc.length - 1].created_at) - new Date(gc[0].created_at)) / 86400000;
+                const totalContributed = gc.reduce((s, c) => s + parseFloat(c.amount), 0);
+                const dailyRate = spanDays > 0 ? totalContributed / spanDays : 0;
+                if (dailyRate > 0) {
+                    daysRemaining = Math.ceil(remaining / dailyRate);
+                    const d = new Date(); d.setDate(d.getDate() + daysRemaining);
+                    estimatedCompletionDate = ymd(d);
+                }
+            }
+            return Object.assign({}, g, { target_amount: target, current_amount: current, remaining, progress, estimatedCompletionDate, daysRemaining });
+        });
+        res.json(enriched);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/goals', requireAuth, async (req, res) => {
+    try {
+        const { name, type, target_amount, target_date } = req.body;
+        if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
+        if (!['buffer', 'savings'].includes(type)) return res.status(400).json({ error: 'type must be "buffer" or "savings"' });
+        if (isNaN(parseFloat(target_amount)) || parseFloat(target_amount) <= 0) return res.status(400).json({ error: 'target_amount must be a positive number' });
+
+        const payload = { name: name.trim(), type, target_amount: parseFloat(target_amount), current_amount: 0, user_id: req.user.id };
+        if (target_date) payload.target_date = target_date;
+
+        const { data, error } = await supabase.from('goals').insert([payload]).select();
+        if (error) throw error;
+        res.status(201).json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/goals/:id', requireAuth, async (req, res) => {
+    try {
+        const { name, target_amount, target_date } = req.body;
+        const updates = {};
+        if (name !== undefined) {
+            if (!name.trim()) return res.status(400).json({ error: 'name is required' });
+            updates.name = name.trim();
+        }
+        if (target_amount !== undefined) {
+            if (isNaN(parseFloat(target_amount)) || parseFloat(target_amount) <= 0) return res.status(400).json({ error: 'invalid target_amount' });
+            updates.target_amount = parseFloat(target_amount);
+        }
+        if (target_date !== undefined) updates.target_date = target_date || null;
+
+        const { data, error } = await supabase.from('goals').update(updates).eq('id', req.params.id).eq('user_id', req.user.id).select();
+        if (error) throw error;
+        if (!data?.length) return res.status(404).json({ error: 'Goal not found' });
+        res.json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/goals/:id', requireAuth, async (req, res) => {
+    try {
+        await supabase.from('goal_contributions').delete().eq('goal_id', req.params.id).eq('user_id', req.user.id);
+        const { error } = await supabase.from('goals').delete().eq('id', req.params.id).eq('user_id', req.user.id);
+        if (error) throw error;
+        res.status(204).send();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Deposit (positive amount) or withdraw (negative amount) from a goal.
+app.post('/api/goals/:id/contribute', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id, { id } = req.params;
+        const amount = parseFloat(req.body.amount);
+        if (isNaN(amount) || amount === 0) return res.status(400).json({ error: 'amount must be a non-zero number' });
+
+        const { data: goalRows, error: gErr } = await supabase.from('goals').select('*').eq('id', id).eq('user_id', uid);
+        if (gErr) throw gErr;
+        if (!goalRows?.length) return res.status(404).json({ error: 'Goal not found' });
+
+        const newAmount = Math.max(0, (parseFloat(goalRows[0].current_amount) || 0) + amount);
+        const { data, error } = await supabase.from('goals').update({ current_amount: newAmount }).eq('id', id).eq('user_id', uid).select();
+        if (error) throw error;
+
+        await supabase.from('goal_contributions').insert([{ goal_id: id, user_id: uid, amount }]);
+        res.json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/goals/:id/contributions', requireAuth, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('goal_contributions').select('*')
+            .eq('goal_id', req.params.id).eq('user_id', req.user.id).order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DEBT MANAGER (extends the existing liabilities table) ────────────────────
+app.put('/api/liabilities/:id', requireAuth, async (req, res) => {
+    try {
+        const { name, amount, due_date, original_amount, monthly_payment, due_day } = req.body;
+        const updates = {};
+        if (name !== undefined) {
+            if (!name.trim()) return res.status(400).json({ error: 'name is required' });
+            updates.name = name.trim();
+        }
+        if (amount !== undefined) {
+            if (isNaN(parseFloat(amount)) || parseFloat(amount) < 0) return res.status(400).json({ error: 'invalid amount' });
+            updates.amount = parseFloat(amount);
+        }
+        if (due_date !== undefined)        updates.due_date        = due_date || null;
+        if (original_amount !== undefined) updates.original_amount = original_amount !== '' ? parseFloat(original_amount) : null;
+        if (monthly_payment !== undefined) updates.monthly_payment = monthly_payment !== '' ? parseFloat(monthly_payment) : null;
+        if (due_day !== undefined)         updates.due_day         = due_day !== '' ? parseInt(due_day) : null;
+
+        const { data, error } = await supabase.from('liabilities').update(updates).eq('id', req.params.id).eq('user_id', req.user.id).select();
+        if (error) throw error;
+        if (!data?.length) return res.status(404).json({ error: 'Liability not found' });
+        res.json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Record a debt payment: creates a "Debt Payments" transaction, decrements the
+// liability balance, and decrements the paying account's balance, atomically-ish.
+app.post('/api/liabilities/:id/pay', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id, { id } = req.params;
+        const { account_id, amount, description } = req.body;
+        if (!account_id) return res.status(400).json({ error: 'account_id is required' });
+        if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'amount must be a positive number' });
+        const amt = parseFloat(amount);
+
+        const { data: liabRows, error: lErr } = await supabase.from('liabilities').select('*').eq('id', id).eq('user_id', uid);
+        if (lErr) throw lErr;
+        if (!liabRows?.length) return res.status(404).json({ error: 'Liability not found' });
+        const liab = liabRows[0];
+
+        const { data: accRows, error: aErr } = await supabase.from('accounts').select('*').eq('id', account_id).eq('user_id', uid);
+        if (aErr) throw aErr;
+        if (!accRows?.length) return res.status(404).json({ error: 'Account not found' });
+        const acc = accRows[0];
+
+        let debtCat = await findCategoryByName(uid, 'Debt Payments');
+        if (!debtCat) {
+            const { data: newCat, error: cErr } = await supabase.from('categories')
+                .insert([{ name: 'Debt Payments', type: 'expense', user_id: uid }]).select();
+            if (cErr) throw cErr;
+            debtCat = newCat[0];
+        }
+
+        const { data: tx, error: tErr } = await supabase.from('transactions').insert([{
+            account_id, type: 'expense', amount: amt,
+            description: description || ('Payment: ' + liab.name),
+            category_id: debtCat.id, liability_id: id, user_id: uid
+        }]).select();
+        if (tErr) throw tErr;
+
+        const newBalance = Math.max(0, parseFloat(liab.amount) - amt);
+        await Promise.all([
+            supabase.from('liabilities').update({ amount: newBalance }).eq('id', id).eq('user_id', uid),
+            supabase.from('accounts').update({ balance: parseFloat(acc.balance) - amt }).eq('id', account_id).eq('user_id', uid)
+        ]);
+
+        res.status(201).json({ transaction: tx[0], newBalance });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/liabilities/:id/payments', requireAuth, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('transactions').select('*, accounts(name)')
+            .eq('liability_id', req.params.id).eq('user_id', req.user.id).order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Progress + estimated payoff date for every liability — automatic, no manual math.
+app.get('/api/liabilities/summary', requireAuth, async (req, res) => {
+    try {
+        const { data: liabs, error } = await supabase.from('liabilities').select('*').eq('user_id', req.user.id);
+        if (error) throw error;
+        const enriched = (liabs || []).map(l => {
+            const original = parseFloat(l.original_amount != null ? l.original_amount : l.amount) || 0;
+            const current  = parseFloat(l.amount) || 0;
+            const paid     = Math.max(0, original - current);
+            const progress = original > 0 ? Math.min(100, Math.round((paid / original) * 100)) : 0;
+            let estimatedPayoffDate = null;
+            if (l.monthly_payment && parseFloat(l.monthly_payment) > 0 && current > 0) {
+                const months = Math.ceil(current / parseFloat(l.monthly_payment));
+                const d = new Date(); d.setMonth(d.getMonth() + months);
+                estimatedPayoffDate = ymd(d);
+            }
+            return Object.assign({}, l, { original_amount: original, paid, progress, estimatedPayoffDate });
+        });
+        res.json(enriched);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── FUEL TRACKER ───────────────────────────────────────────────────────────────
+app.get('/api/fuel', requireAuth, async (req, res) => {
+    try {
+        const { start, end } = req.query;
+        let q = supabase.from('fuel_logs').select('*').eq('user_id', req.user.id).order('log_date', { ascending: false });
+        if (start && end) q = q.gte('log_date', start).lte('log_date', end);
+        const { data, error } = await q;
+        if (error) throw error;
+        res.json(data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/fuel', requireAuth, async (req, res) => {
+    try {
+        const { log_date, liters, cost, odometer, station, notes } = req.body;
+        if (isNaN(parseFloat(cost)) || parseFloat(cost) <= 0) return res.status(400).json({ error: 'cost must be a positive number' });
+        const payload = {
+            user_id: req.user.id,
+            log_date: log_date || ymd(new Date()),
+            cost: parseFloat(cost),
+            liters:   (liters   !== undefined && liters   !== '') ? parseFloat(liters)   : null,
+            odometer: (odometer !== undefined && odometer !== '') ? parseFloat(odometer) : null,
+            station: station || null,
+            notes:   notes   || null
+        };
+        const { data, error } = await supabase.from('fuel_logs').insert([payload]).select();
+        if (error) throw error;
+        res.status(201).json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/fuel/:id', requireAuth, async (req, res) => {
+    try {
+        const { log_date, liters, cost, odometer, station, notes } = req.body;
+        if (isNaN(parseFloat(cost)) || parseFloat(cost) <= 0) return res.status(400).json({ error: 'cost must be a positive number' });
+        const updates = {
+            log_date: log_date || ymd(new Date()),
+            cost: parseFloat(cost),
+            liters:   (liters   !== undefined && liters   !== '') ? parseFloat(liters)   : null,
+            odometer: (odometer !== undefined && odometer !== '') ? parseFloat(odometer) : null,
+            station: station || null,
+            notes:   notes   || null
+        };
+        const { data, error } = await supabase.from('fuel_logs').update(updates).eq('id', req.params.id).eq('user_id', req.user.id).select();
+        if (error) throw error;
+        if (!data?.length) return res.status(404).json({ error: 'Fuel log not found' });
+        res.json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/fuel/:id', requireAuth, async (req, res) => {
+    try {
+        const { error } = await supabase.from('fuel_logs').delete().eq('id', req.params.id).eq('user_id', req.user.id);
+        if (error) throw error;
+        res.status(204).send();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/fuel/stats', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const { data: logsRaw, error } = await supabase.from('fuel_logs').select('*').eq('user_id', uid).order('log_date', { ascending: false });
+        if (error) throw error;
+        const list = logsRaw || [];
+        const avgCost = list.length ? list.reduce((s, l) => s + (parseFloat(l.cost) || 0), 0) / list.length : 0;
+
+        const now = new Date();
+        const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0, 0, 0, 0);
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const fuelPerWeek  = list.filter(l => new Date(l.log_date) >= weekStart).reduce((s, l) => s + (parseFloat(l.cost) || 0), 0);
+        const fuelPerMonth = list.filter(l => new Date(l.log_date) >= monthStart).reduce((s, l) => s + (parseFloat(l.cost) || 0), 0);
+
+        let workdaysElapsed = 0;
+        for (let d = new Date(monthStart); d <= now; d.setDate(d.getDate() + 1)) {
+            if (isWorkday(d)) workdaysElapsed++;
+        }
+        const avgCostPerWorkday = workdaysElapsed > 0 ? fuelPerMonth / workdaysElapsed : 0;
+
+        res.json({ avgCost, fuelPerWeek, fuelPerMonth, avgCostPerWorkday, totalLogs: list.length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── INCOME / EXPENSE TRACKING (built on top of existing transactions+categories) ──
+app.get('/api/income/summary', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const { data: cats } = await supabase.from('categories').select('*').eq('user_id', uid).in('type', ['income', 'both']);
+        const { data: tx }   = await supabase.from('transactions').select('amount, category_id, created_at').eq('user_id', uid).eq('type', 'income');
+
+        const now = new Date();
+        const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+        const weekStart = new Date(dayStart); weekStart.setDate(dayStart.getDate() - dayStart.getDay());
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const yearStart  = new Date(now.getFullYear(), 0, 1);
+        const sumSince = (date) => (tx || []).filter(t => new Date(t.created_at) >= date).reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+
+        const bySource = {};
+        (tx || []).forEach(t => {
+            const cat = (cats || []).find(c => c.id === t.category_id);
+            const label = cat ? cat.name : 'Uncategorized';
+            bySource[label] = (bySource[label] || 0) + (parseFloat(t.amount) || 0);
+        });
+
+        res.json({
+            daily: sumSince(dayStart), weekly: sumSince(weekStart),
+            monthly: sumSince(monthStart), yearly: sumSince(yearStart),
+            bySource
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/expenses/summary', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const { data: cats } = await supabase.from('categories').select('*').eq('user_id', uid);
+        const { data: tx }   = await supabase.from('transactions').select('amount, category_id, created_at').eq('user_id', uid).eq('type', 'expense');
+
+        const now = new Date();
+        const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+        const weekStart = new Date(dayStart); weekStart.setDate(dayStart.getDate() - dayStart.getDay());
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const yearStart  = new Date(now.getFullYear(), 0, 1);
+        const sumSince = (date) => (tx || []).filter(t => new Date(t.created_at) >= date).reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+
+        const byCategory = {};
+        (tx || []).forEach(t => {
+            const cat = (cats || []).find(c => c.id === t.category_id);
+            const label = cat ? cat.name : 'Uncategorized';
+            byCategory[label] = (byCategory[label] || 0) + (parseFloat(t.amount) || 0);
+        });
+        const total = Object.values(byCategory).reduce((s, v) => s + v, 0);
+        const distribution = Object.keys(byCategory)
+            .map(k => ({ category: k, amount: byCategory[k], percent: total > 0 ? Math.round((byCategory[k] / total) * 100) : 0 }))
+            .sort((a, b) => b.amount - a.amount);
+
+        res.json({
+            daily: sumSince(dayStart), weekly: sumSince(weekStart),
+            monthly: sumSince(monthStart), yearly: sumSince(yearStart),
+            distribution
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CALENDAR ───────────────────────────────────────────────────────────────────
+app.get('/api/calendar', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const month = req.query.month; // 'YYYY-MM'
+        let y, m;
+        if (month && /^\d{4}-\d{2}$/.test(month)) { [y, m] = month.split('-').map(Number); m -= 1; }
+        else { const now = new Date(); y = now.getFullYear(); m = now.getMonth(); }
+        const start = new Date(y, m, 1, 0, 0, 0, 0);
+        const end   = new Date(y, m + 1, 0, 23, 59, 59, 999);
+
+        const [{ data: tx }, { data: fuel }, { data: contributions }, { data: cats }] = await Promise.all([
+            supabase.from('transactions').select('*').eq('user_id', uid).gte('created_at', start.toISOString()).lte('created_at', end.toISOString()),
+            supabase.from('fuel_logs').select('*').eq('user_id', uid).gte('log_date', ymd(start)).lte('log_date', ymd(end)),
+            supabase.from('goal_contributions').select('*').eq('user_id', uid).gte('created_at', start.toISOString()).lte('created_at', end.toISOString()),
+            supabase.from('categories').select('*').eq('user_id', uid)
+        ]);
+
+        const debtCat = (cats || []).find(c => /^debt payments$/i.test((c.name || '').trim()));
+        const pjCat   = (cats || []).find(c => /^primary job$/i.test((c.name || '').trim()));
+
+        const days = {};
+        const ensure = (key) => { if (!days[key]) days[key] = { income: 0, expense: 0, fuel: 0, debtPayments: 0, payroll: 0, bufferDeposits: 0, transactions: [] }; return days[key]; };
+
+        (tx || []).forEach(t => {
+            const key = ymd(t.created_at);
+            const day = ensure(key);
+            const amt = parseFloat(t.amount) || 0;
+            if (t.type === 'income') {
+                day.income += amt;
+                if (pjCat && t.category_id === pjCat.id) day.payroll += amt;
+            } else {
+                day.expense += amt;
+                if (debtCat && t.category_id === debtCat.id) day.debtPayments += amt;
+            }
+            day.transactions.push(t);
+        });
+        (fuel || []).forEach(f => { ensure(f.log_date).fuel += parseFloat(f.cost) || 0; });
+        (contributions || []).forEach(c => {
+            if (parseFloat(c.amount) > 0) ensure(ymd(c.created_at)).bufferDeposits += parseFloat(c.amount);
+        });
+
+        // Net Cash = income minus expense. (Fuel is shown separately for visibility;
+        // if a fuel purchase was *also* logged as a categorized expense transaction,
+        // it's already counted once in `expense` — fuel_logs are not double-subtracted.)
+        const result = Object.keys(days)
+            .map(key => Object.assign({ date: key }, days[key], { netCash: days[key].income - days[key].expense }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+
+        res.json({ month: y + '-' + String(m + 1).padStart(2, '0'), days: result });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── NOTIFICATIONS ──────────────────────────────────────────────────────────────
+// Computed live on every request — always reflects current data, nothing to sync.
+app.get('/api/notifications', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const settings = await getCashflowSettings(uid);
+        const prefs = settings.notification_prefs;
+        const notifications = [];
+        const now = new Date(); now.setHours(0, 0, 0, 0);
+
+        const nextPayroll = getNextPayroll(settings.payroll_days, now);
+
+        if (prefs.payroll_tomorrow && nextPayroll) {
+            const days = Math.round((nextPayroll - now) / 86400000);
+            if (days === 1) {
+                notifications.push({ type: 'payroll_tomorrow', severity: 'info', title: 'Payroll Tomorrow',
+                    message: 'Your next payroll arrives tomorrow (' + ymd(nextPayroll) + ').' });
+            }
+        }
+
+        if (prefs.fuel_low) {
+            const today = ymd(now);
+            const { data: todaysFuel } = await supabase.from('fuel_logs').select('cost').eq('user_id', uid).eq('log_date', today);
+            const spentToday = (todaysFuel || []).reduce((s, f) => s + (parseFloat(f.cost) || 0), 0);
+            if (spentToday > settings.daily_fuel_budget) {
+                notifications.push({ type: 'fuel_low', severity: 'warning', title: 'Fuel Budget Running Low',
+                    message: "Today's fuel spend (₱" + spentToday.toFixed(2) + ') is over your ₱' + settings.daily_fuel_budget.toFixed(2) + ' daily budget.' });
+            }
+        }
+
+        if (prefs.buffer_goal) {
+            const { data: goals } = await supabase.from('goals').select('*').eq('user_id', uid).eq('type', 'buffer');
+            (goals || []).forEach(g => {
+                const target = parseFloat(g.target_amount) || 0;
+                if (target > 0 && parseFloat(g.current_amount) >= target) {
+                    notifications.push({ type: 'buffer_goal', severity: 'success', title: 'Buffer Goal Achieved',
+                        message: '"' + g.name + '" reached its target of ₱' + target.toFixed(2) + '.' });
+                }
+            });
+        }
+
+        if (prefs.debt_due) {
+            const { data: liabs } = await supabase.from('liabilities').select('*').eq('user_id', uid);
+            (liabs || []).forEach(l => {
+                if (!l.due_date) return;
+                const due = new Date(l.due_date + 'T00:00:00');
+                const days = Math.floor((due - now) / 86400000);
+                if (days >= 0 && days <= 3) {
+                    notifications.push({ type: 'debt_due', severity: days <= 1 ? 'urgent' : 'warning', title: 'Debt Due Soon',
+                        message: l.name + ' (₱' + parseFloat(l.amount).toFixed(2) + ') due ' + (days === 0 ? 'today' : 'in ' + days + ' day(s)') + '.' });
+                }
+            });
+        }
+
+        if (prefs.cash_low || prefs.financial_risk) {
+            const { data: accounts } = await supabase.from('accounts').select('balance').eq('user_id', uid);
+            const availableCash = (accounts || []).reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
+            const todayReq = settings.daily_family_budget + (isWorkday(now) ? settings.daily_fuel_budget : 0);
+
+            if (prefs.cash_low && availableCash < todayReq) {
+                notifications.push({ type: 'cash_low', severity: 'urgent', title: 'Cash Running Low',
+                    message: 'Available cash (₱' + availableCash.toFixed(2) + ") is below today's requirement (₱" + todayReq.toFixed(2) + ').' });
+            }
+            if (prefs.financial_risk && nextPayroll) {
+                const daysUntilPayroll = Math.round((nextPayroll - now) / 86400000);
+                const projectedDeficit = availableCash - (todayReq * daysUntilPayroll);
+                if (projectedDeficit < 0) {
+                    notifications.push({ type: 'financial_risk', severity: 'urgent', title: 'Upcoming Financial Risk',
+                        message: 'At current spending, cash may run out before your next payroll on ' + ymd(nextPayroll) + '.' });
+                }
+            }
+        }
+
+        res.json(notifications);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── REPORTS (data endpoint — client builds the PDF/Excel/CSV export) ─────────
+app.get('/api/reports', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id;
+        const { start, end } = req.query;
+        if (!start || !end) return res.status(400).json({ error: 'start and end are required' });
+
+        const [{ data: tx }, { data: fuel }, { data: cats }] = await Promise.all([
+            supabase.from('transactions').select('*, accounts(name)').eq('user_id', uid)
+                .gte('created_at', start).lte('created_at', end).order('created_at', { ascending: true }),
+            supabase.from('fuel_logs').select('*').eq('user_id', uid)
+                .gte('log_date', start.slice(0, 10)).lte('log_date', end.slice(0, 10)).order('log_date', { ascending: true }),
+            supabase.from('categories').select('*').eq('user_id', uid)
+        ]);
+
+        let income = 0, expense = 0;
+        (tx || []).forEach(t => { const a = parseFloat(t.amount) || 0; if (t.type === 'income') income += a; else expense += a; });
+        const fuelTotal = (fuel || []).reduce((s, f) => s + (parseFloat(f.cost) || 0), 0);
+
+        res.json({
+            range: { start, end },
+            summary: { income, expense, net: income - expense, fuelTotal },
+            transactions: (tx || []).map(t => Object.assign({}, t, {
+                category_name: (cats || []).find(c => c.id === t.category_id)?.name || ''
+            })),
+            fuelLogs: fuel || []
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 const PORT = process.env.PORT || 3000;
