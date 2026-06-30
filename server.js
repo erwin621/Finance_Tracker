@@ -122,16 +122,19 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 //
 //  -- 6. Fuel Tracker log.
 //  CREATE TABLE IF NOT EXISTS fuel_logs (
-//    id         UUID          DEFAULT gen_random_uuid() PRIMARY KEY,
-//    user_id    UUID          NOT NULL,
-//    log_date   DATE          NOT NULL DEFAULT CURRENT_DATE,
-//    liters     DECIMAL(8,2),
-//    cost       DECIMAL(10,2) NOT NULL CHECK (cost > 0),
-//    odometer   DECIMAL(10,1),
-//    station    TEXT,
-//    notes      TEXT,
-//    created_at TIMESTAMPTZ   DEFAULT now()
+//    id             UUID          DEFAULT gen_random_uuid() PRIMARY KEY,
+//    user_id        UUID          NOT NULL,
+//    log_date       DATE          NOT NULL DEFAULT CURRENT_DATE,
+//    liters         DECIMAL(8,2),
+//    cost           DECIMAL(10,2) NOT NULL CHECK (cost > 0),
+//    odometer       DECIMAL(10,1),
+//    station        TEXT,
+//    notes          TEXT,
+//    transaction_id UUID,                    -- links to the auto-created "Fuel" expense transaction
+//    created_at     TIMESTAMPTZ   DEFAULT now()
 //  );
+//  -- If you already ran the previous migration, add the column:
+//  ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS transaction_id UUID;
 //
 //  -- 7. Optional FK references (recommended).
 //  ALTER TABLE goals              ADD CONSTRAINT fk_goal_user FOREIGN KEY (user_id)     REFERENCES auth.users(id) ON DELETE CASCADE;
@@ -381,6 +384,15 @@ app.put('/api/transactions/:id', requireAuth, async (req, res) => {
 });
 
 // ── ACCOUNTS CRUD ─────────────────────────────────────────────────────────────
+app.delete('/api/transactions/:id', requireAuth, async (req, res) => {
+    try {
+        const uid = req.user.id, { id } = req.params;
+        const { error } = await supabase.from('transactions').delete().eq('id', id).eq('user_id', uid);
+        if (error) throw error;
+        res.status(204).send();
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/accounts', requireAuth, async (req, res) => {
     try {
         const { data, error } = await supabase.from('accounts').select('*')
@@ -1318,7 +1330,7 @@ app.get('/api/fuel', requireAuth, async (req, res) => {
 
 app.post('/api/fuel', requireAuth, async (req, res) => {
     try {
-        const { log_date, liters, cost, odometer, station, notes } = req.body;
+        const { log_date, liters, cost, odometer, station, notes, transaction_id } = req.body;
         if (isNaN(parseFloat(cost)) || parseFloat(cost) <= 0) return res.status(400).json({ error: 'cost must be a positive number' });
         const payload = {
             user_id: req.user.id,
@@ -1327,7 +1339,10 @@ app.post('/api/fuel', requireAuth, async (req, res) => {
             liters:   (liters   !== undefined && liters   !== '') ? parseFloat(liters)   : null,
             odometer: (odometer !== undefined && odometer !== '') ? parseFloat(odometer) : null,
             station: station || null,
-            notes:   notes   || null
+            notes:   notes   || null,
+            // Links this fuel log back to the expense transaction created by the client,
+            // so deleteFuelLog can cascade-delete both records in one action.
+            transaction_id: transaction_id || null
         };
         const { data, error } = await supabase.from('fuel_logs').insert([payload]).select();
         if (error) throw error;
