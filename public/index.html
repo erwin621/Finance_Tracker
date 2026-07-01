@@ -98,7 +98,31 @@
         .page-subtitle { font-size: 0.75rem; color: var(--muted); margin-top: 1px; }
 
         /* ── Balance Card ── */
-        .balance-card { background: var(--primary); margin: 16px 18px 0; border-radius: var(--radius-lg); padding: 22px 22px 20px; color: white; position: relative; overflow: hidden; }
+        /* Sticky wrapper: keeps the card's original spacing (16px 18px 0, matching
+           the old margin) so unpinned layout is pixel-identical to before. Position:
+           sticky lets the card keep its normal document-flow slot (no placeholder
+           needed, no content jump) while pinning to the top once scrolled past. */
+        #balance-sentinel { height: 1px; }
+        .balance-sticky-zone {
+            position: sticky; top: 0; z-index: 40;
+            padding: 16px 18px 0;
+            background: var(--bg);
+            transition: background-color 0.25s ease;
+        }
+        .balance-sticky-zone.is-pinned {
+            background: rgba(244,246,251,0.88);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+        }
+        .balance-card {
+            background: var(--primary); margin: 0; border-radius: var(--radius-lg); padding: 22px 22px 20px; color: white; position: relative; overflow: hidden;
+            transform-origin: top center; will-change: transform;
+            transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), box-shadow 0.25s cubic-bezier(0.4,0,0.2,1);
+        }
+        .balance-sticky-zone.is-pinned .balance-card {
+            transform: scale(0.98);
+            box-shadow: 0 10px 26px rgba(15,23,42,0.20), 0 3px 10px rgba(15,23,42,0.12);
+        }
         .balance-card::before { content: ''; position: absolute; top: -30px; right: -30px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.08); }
         .balance-card::after  { content: ''; position: absolute; bottom: -40px; right: 40px; width: 90px; height: 90px; border-radius: 50%; background: rgba(255,255,255,0.05); }
         .balance-label  { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; opacity: 0.75; margin-bottom: 6px; }
@@ -327,7 +351,14 @@
         .profile-action-chevron { color: var(--muted); }
 
         /* ── Bottom Nav ── */
-        .bottom-nav { position: fixed; bottom: 0; width: 100%; max-width: 430px; background: var(--surface); display: flex; justify-content: space-around; align-items: center; padding: 10px 0 14px; border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(0,0,0,0.06); z-index: 100; }
+        .bottom-nav {
+            position: fixed; bottom: 0; width: 100%; max-width: 430px; background: var(--surface); display: flex; justify-content: space-around; align-items: center; padding: 10px 0 14px; border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(0,0,0,0.06); z-index: 100;
+            transform: translateY(0); opacity: 1; will-change: transform, opacity;
+            transition: transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.28s cubic-bezier(0.4,0,0.2,1);
+        }
+        /* Slides the whole bar (and the floating + button, which is one of its
+           children) down and out, fading it out as it goes. */
+        .bottom-nav.nav-hidden { transform: translateY(100%); opacity: 0; pointer-events: none; }
         .nav-item { color: var(--muted); background: none; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 0.6rem; font-weight: 600; font-family: inherit; padding: 4px 12px; border-radius: 8px; transition: color 0.15s; }
         .nav-item.active { color: var(--primary); }
         .nav-add { background: var(--primary); width: 48px; height: 48px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; transform: translateY(-14px); box-shadow: 0 4px 14px rgba(37,99,235,0.4); border: 3px solid var(--bg); cursor: pointer; transition: transform 0.15s; }
@@ -657,10 +688,13 @@
             </div>
         </div>
 
-        <div class="balance-card">
-            <div class="balance-label">Total Balance</div>
-            <div class="balance-amount" id="val-balance">&#x20B1;0.00</div>
-            <div class="balance-period">All accounts</div>
+        <div id="balance-sentinel"></div>
+        <div class="balance-sticky-zone" id="balance-sticky-zone">
+            <div class="balance-card">
+                <div class="balance-label">Total Balance</div>
+                <div class="balance-amount" id="val-balance">&#x20B1;0.00</div>
+                <div class="balance-period">All accounts</div>
+            </div>
         </div>
 
         <div class="filter-row" id="timeframe-container">
@@ -3489,6 +3523,66 @@
     }
 
     initApp();
+</script>
+
+<!-- ═══════════════ UI ENHANCEMENTS: sticky balance card + auto-hide nav ═══════════════
+     Purely presentational — reads scroll position only, never touches app state,
+     financial calculations, or any existing DOM the app logic depends on. -->
+<script>
+(function () {
+    'use strict';
+
+    var nav        = document.querySelector('.bottom-nav');
+    var sentinel   = document.getElementById('balance-sentinel');
+    var stickyZone = document.getElementById('balance-sticky-zone');
+
+    if (!nav && !sentinel) return; // nothing to enhance
+
+    var lastY = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    var ticking = false;
+
+    var NAV_DELTA_THRESHOLD = 6;  // px of scroll movement before nav reacts — avoids flicker on tiny/jittery scrolls
+    var NAV_TOP_REVEAL      = 40; // always keep nav visible near the very top of the page
+
+    function update() {
+        var y = Math.max(0, window.scrollY || window.pageYOffset || 0);
+
+        // ── Sticky balance card: toggle "pinned" visuals once it's actually stuck ──
+        // (position:sticky handles the pinning itself; this just detects it so we
+        // can layer on the shadow/scale/blur without any manual position math.)
+        if (sentinel && stickyZone) {
+            var isPinned = sentinel.getBoundingClientRect().bottom <= 0;
+            if (isPinned !== stickyZone.classList.contains('is-pinned')) {
+                stickyZone.classList.toggle('is-pinned', isPinned);
+            }
+        }
+
+        // ── Bottom nav auto-hide, direction-aware with a movement threshold ──
+        if (nav) {
+            var delta = y - lastY;
+            if (y <= NAV_TOP_REVEAL) {
+                nav.classList.remove('nav-hidden');
+                lastY = y;
+            } else if (Math.abs(delta) > NAV_DELTA_THRESHOLD) {
+                if (delta > 0) nav.classList.add('nav-hidden');   // scrolling down → hide
+                else            nav.classList.remove('nav-hidden'); // scrolling up → show
+                lastY = y;
+            }
+        }
+
+        ticking = false;
+    }
+
+    function onScroll() {
+        if (!ticking) {
+            ticking = true;
+            window.requestAnimationFrame(update);
+        }
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    update(); // set correct initial state on load
+})();
 </script>
 </body>
 </html>
