@@ -757,6 +757,10 @@ app.put('/api/settings', requireAuth, async (req, res) => {
         if (req.body.expected_payroll    !== undefined) payload.expected_payroll    = parseFloat(req.body.expected_payroll) || 0;
         if (req.body.currency            !== undefined) payload.currency            = req.body.currency || 'PHP';
         if (req.body.notification_prefs  !== undefined) payload.notification_prefs  = req.body.notification_prefs;
+        // Phase 1: Three-level buffer settings
+        if (req.body.emergency_buffer_target !== undefined) payload.emergency_buffer_target = parseFloat(req.body.emergency_buffer_target) || 3000;
+        if (req.body.operating_buffer_days   !== undefined) payload.operating_buffer_days   = parseInt(req.body.operating_buffer_days, 10) || 7;
+        if (req.body.target_buffer           !== undefined) payload.target_buffer           = parseFloat(req.body.target_buffer) || 10000;
 
         const { data, error } = await supabase
             .from('user_settings')
@@ -841,16 +845,21 @@ async function getCashflowSettings(uid) {
     const { data } = await supabase.from('user_settings').select('*').eq('user_id', uid).single();
     const base = data || {};
     return {
-        daily_goal:          parseFloat(base.daily_goal) || 0,
-        daily_family_budget: base.daily_family_budget != null ? parseFloat(base.daily_family_budget) : 700,
-        daily_fuel_budget:   base.daily_fuel_budget   != null ? parseFloat(base.daily_fuel_budget)   : 250,
-        payroll_days:        (Array.isArray(base.payroll_days) && base.payroll_days.length) ? base.payroll_days.map(Number) : [15, 30],
-        expected_payroll:    base.expected_payroll != null ? parseFloat(base.expected_payroll) : 6750,
-        currency:            base.currency || 'PHP',
-        notification_prefs:  base.notification_prefs || {
+        daily_goal:             parseFloat(base.daily_goal) || 0,
+        daily_family_budget:    base.daily_family_budget != null ? parseFloat(base.daily_family_budget) : 700,
+        daily_fuel_budget:      base.daily_fuel_budget   != null ? parseFloat(base.daily_fuel_budget)   : 250,
+        payroll_days:           (Array.isArray(base.payroll_days) && base.payroll_days.length) ? base.payroll_days.map(Number) : [15, 30],
+        expected_payroll:       base.expected_payroll != null ? parseFloat(base.expected_payroll) : 6750,
+        currency:               base.currency || 'PHP',
+        notification_prefs:     base.notification_prefs || {
             payroll_tomorrow: true, fuel_low: true, buffer_goal: true,
             debt_due: true, cash_low: true, financial_risk: true
-        }
+        },
+        // Phase 1 — Three-level buffer targets (configurable from Settings)
+        // DEFAULT: Emergency ₱3 000 | Operating 7 × daily cost | Target ₱10 000
+        emergency_buffer_target: base.emergency_buffer_target != null ? parseFloat(base.emergency_buffer_target) : 3000,
+        operating_buffer_days:   base.operating_buffer_days  != null ? parseInt(base.operating_buffer_days, 10)  : 7,
+        target_buffer:           base.target_buffer          != null ? parseFloat(base.target_buffer)            : 10000
     };
 }
 
@@ -1622,6 +1631,462 @@ app.get('/api/reports', requireAuth, async (req, res) => {
         });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ███ FINANCIAL ANALYSIS ENGINE — PHASE 1–4 ███
+//
+// MIGRATION (additive — run once in Supabase SQL Editor):
+//
+//  -- Phase 1: Three-level buffer targets on user_settings
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS emergency_buffer_target DECIMAL(12,2) DEFAULT 3000;
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS operating_buffer_days   INTEGER       DEFAULT 7;
+//  ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS target_buffer           DECIMAL(12,2) DEFAULT 10000;
+//
+//  -- Phase 2: Separate recurring bills from personal debts on existing liabilities table.
+//  --          Default = 'debt' so every existing row keeps working without any data change.
+//  ALTER TABLE liabilities ADD COLUMN IF NOT EXISTS liability_type TEXT NOT NULL DEFAULT 'debt';
+//  --  liability_type = 'bill'  → recurring monthly expense (Meralco, Water, Internet …)
+//  --  liability_type = 'debt'  → personal debt with a decreasing balance (existing behaviour)
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Phase 2 helper: next calendar date a bill's due_day falls on ─────────────
+/**
+ * Given a day-of-month (1–31) and a reference date, return the next Date on
+ * which that day occurs (today included if today is that day).
+ * @param {number} dueDay - day of month (1–31)
+ * @param {Date}   from   - reference date (time set to 00:00)
+ * @returns {Date}
+ */
+function getNextDueDate(dueDay, from) {
+    const clamp = (y, m) => Math.min(dueDay, daysInMonth(y, m));
+    const thisMonthDate = new Date(from.getFullYear(), from.getMonth(), clamp(from.getFullYear(), from.getMonth()));
+    if (thisMonthDate >= from) return thisMonthDate;
+    const nm = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+    return new Date(nm.getFullYear(), nm.getMonth(), clamp(nm.getFullYear(), nm.getMonth()));
+}
+
+// ── Phase 4: Financial Health Score ──────────────────────────────────────────
+/**
+ * Computes a 0–100 health score from six independent factors.
+ * Each factor is weighted according to its importance to daily cash-flow resilience.
+ *
+ * @typedef {{ score:number, max:number, label:string }} Factor
+ * @typedef {{ score:number, label:string, color:string, factors:Object.<string,Factor> }} HealthScore
+ *
+ * @param {{
+ *   availableCash:          number,
+ *   remainingDebt:          number,
+ *   avgDailyIncome:         number,
+ *   dailyOperatingCost:     number,
+ *   emergencyBufferTarget:  number,
+ *   operatingBufferTarget:  number,
+ *   currentBuffer:          number,
+ *   upcomingBillsTotal:     number,
+ *   dailySavingsCapacity:   number,
+ *   incomeStabilityPct:     number   // 0–100 from coefficient-of-variation analysis
+ * }} p
+ * @returns {HealthScore}
+ */
+function computeHealthScore(p) {
+    // Factor 1 — Debt Ratio (20 pts)
+    // Ratio of remaining debt to available cash. Lower = better.
+    // debtRatio > 5 → 0 pts; debtRatio = 0 → 20 pts.
+    const debtRatio  = p.availableCash > 0 ? Math.min(p.remainingDebt / p.availableCash, 5) : (p.remainingDebt > 0 ? 5 : 0);
+    const debtScore  = Math.round(Math.max(0, 20 * (1 - debtRatio / 5)));
+
+    // Factor 2 — Emergency Buffer funded (15 pts)
+    // Does available cash cover the ₱3 000 emergency target?
+    const emergencyScore = Math.round(15 * Math.min(1, p.availableCash / Math.max(p.emergencyBufferTarget, 1)));
+
+    // Factor 3 — Operating Buffer funded (15 pts)
+    // Does the buffer goal cover 7 × daily operating cost?
+    const operatingScore = Math.round(15 * Math.min(1, p.currentBuffer / Math.max(p.operatingBufferTarget, 1)));
+
+    // Factor 4 — Upcoming bills covered (20 pts)
+    // Can available cash cover bills due in the next 30 days?
+    const billsScore = p.upcomingBillsTotal === 0
+        ? 20
+        : Math.round(20 * Math.min(1, p.availableCash / Math.max(p.upcomingBillsTotal, 1)));
+
+    // Factor 5 — Income stability (15 pts)
+    // Based on the coefficient of variation of daily income — passed in as 0–100 %.
+    const stabilityScore = Math.round(15 * p.incomeStabilityPct / 100);
+
+    // Factor 6 — Daily savings capacity (15 pts)
+    // ₱700/day = excellent (full marks). Negative = 0.
+    const capacityScore = Math.round(15 * Math.min(1, Math.max(0, p.dailySavingsCapacity) / 700));
+
+    const total = debtScore + emergencyScore + operatingScore + billsScore + stabilityScore + capacityScore;
+
+    let label, color;
+    if      (total >= 75) { label = 'Excellent'; color = 'green';  }
+    else if (total >= 55) { label = 'Good';      color = 'blue';   }
+    else if (total >= 35) { label = 'Warning';   color = 'yellow'; }
+    else                  { label = 'Critical';  color = 'red';    }
+
+    return {
+        score: total, label, color,
+        factors: {
+            debtRatio:      { score: debtScore,     max: 20, label: 'Debt Ratio'       },
+            emergency:      { score: emergencyScore, max: 15, label: 'Emergency Buffer' },
+            operating:      { score: operatingScore, max: 15, label: 'Operating Buffer' },
+            billsCoverage:  { score: billsScore,     max: 20, label: 'Bills Coverage'   },
+            stability:      { score: stabilityScore, max: 15, label: 'Income Stability' },
+            savings:        { score: capacityScore,  max: 15, label: 'Savings Capacity' }
+        }
+    };
+}
+
+// ── Phase 1: Central Financial Calculation Engine ─────────────────────────────
+/**
+ * Single source of truth for all financial KPIs.
+ * Every number exposed by /api/engine/snapshot flows through here.
+ * No endpoint or UI component should re-derive these values independently.
+ *
+ * @param {string} uid - authenticated user id
+ * @returns {Promise<Object>} snapshot
+ */
+async function computeFinancialSnapshot(uid) {
+    const settings = await getCashflowSettings(uid);
+    // Daily operating cost = family budget + fuel budget (both configurable)
+    const dailyOperatingCost = settings.daily_family_budget + settings.daily_fuel_budget;
+
+    // ── 1. Available cash (sum of all account balances) ───────────────────────
+    const [
+        { data: accounts },
+        { data: cats },
+        { data: allLiabilities },
+        { data: bufferGoals }
+    ] = await Promise.all([
+        supabase.from('accounts').select('*').eq('user_id', uid),
+        supabase.from('categories').select('id, name, type').eq('user_id', uid),
+        supabase.from('liabilities').select('*').eq('user_id', uid),
+        supabase.from('goals').select('*').eq('user_id', uid).eq('type', 'buffer')
+    ]);
+
+    const availableCash = (accounts || []).reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
+
+    // ── 2. Income — trailing 30-day average from ALL sources (the core fix) ───
+    // THE BUG WAS HERE: old code only used SFD + Lalamove categories.
+    // Correct: average ALL income transactions over the last 30 days.
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const thirtyAgo = new Date(now); thirtyAgo.setDate(now.getDate() - 30);
+
+    const { data: recentIncomeTx } = await supabase
+        .from('transactions').select('amount, category_id, created_at')
+        .eq('user_id', uid).eq('type', 'income')
+        .gte('created_at', thirtyAgo.toISOString());
+
+    const totalIncomeLast30 = (recentIncomeTx || []).reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    /** Average ₱ earned per calendar day over the last 30 days across ALL income sources */
+    const avgDailyIncome = totalIncomeLast30 / 30;
+
+    // Income by source (for breakdown chart)
+    const incomeBySource = {};
+    (recentIncomeTx || []).forEach(t => {
+        const cat  = (cats || []).find(c => c.id === t.category_id);
+        const name = cat ? cat.name : 'Uncategorized';
+        incomeBySource[name] = (incomeBySource[name] || 0) + (parseFloat(t.amount) || 0);
+    });
+
+    // Income stability: coefficient of variation of daily totals (past 30 days)
+    // Low CV → consistent income → higher stability score.
+    const dailyMap = {};
+    (recentIncomeTx || []).forEach(t => {
+        const day = ymd(t.created_at);
+        dailyMap[day] = (dailyMap[day] || 0) + (parseFloat(t.amount) || 0);
+    });
+    const dailyValues = Object.values(dailyMap);
+    let incomeStabilityPct = 50; // default mid
+    if (dailyValues.length >= 5) {
+        const mean = dailyValues.reduce((s, v) => s + v, 0) / dailyValues.length;
+        const variance = dailyValues.reduce((s, v) => s + (v - mean) ** 2, 0) / dailyValues.length;
+        const cv = mean > 0 ? Math.sqrt(variance) / mean : 1;
+        // cv 0 → 100%; cv ≥ 1.5 → 0%
+        incomeStabilityPct = Math.max(0, Math.min(100, Math.round((1 - Math.min(cv / 1.5, 1)) * 100)));
+    }
+
+    // ── 3. Expenses — trailing 30-day average ────────────────────────────────
+    const { data: recentExpenseTx } = await supabase
+        .from('transactions').select('amount, category_id, created_at')
+        .eq('user_id', uid).eq('type', 'expense')
+        .gte('created_at', thirtyAgo.toISOString());
+
+    const totalExpenseLast30 = (recentExpenseTx || []).reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const avgDailyExpense = totalExpenseLast30 / 30;
+
+    // ── 4. Bills vs Debts — SEPARATED ────────────────────────────────────────
+    // Bills  (liability_type = 'bill')  → recurring monthly obligations
+    // Debts  (liability_type = 'debt' or null) → personal debts with decreasing balance
+    const bills = (allLiabilities || []).filter(l => l.liability_type === 'bill');
+    const debts = (allLiabilities || []).filter(l => l.liability_type !== 'bill');
+
+    // Upcoming bills: those whose due_day falls within the next 30 days
+    const billsEnriched = bills.map(b => {
+        const nextDue     = b.due_day ? getNextDueDate(parseInt(b.due_day), now) : null;
+        const daysUntilDue = nextDue ? Math.round((nextDue - now) / 86400000) : null;
+        const inWindow     = daysUntilDue !== null ? (daysUntilDue >= 0 && daysUntilDue <= 30) : true;
+        return Object.assign({}, b, { nextDueDate: nextDue ? ymd(nextDue) : null, daysUntilDue, inWindow });
+    }).sort((a, b) => (a.daysUntilDue ?? 999) - (b.daysUntilDue ?? 999));
+
+    const upcomingBillsTotal = billsEnriched
+        .filter(b => b.inWindow)
+        .reduce((s, b) => s + (parseFloat(b.amount) || 0), 0);
+
+    const remainingDebt = debts.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0);
+
+    // ── 5. Three-level buffer ─────────────────────────────────────────────────
+    const currentBuffer         = (bufferGoals || []).reduce((s, g) => s + (parseFloat(g.current_amount) || 0), 0);
+    const emergencyBufferTarget = settings.emergency_buffer_target;
+    const operatingBufferTarget = dailyOperatingCost * settings.operating_buffer_days;
+    const targetBufferAmount    = settings.target_buffer;
+
+    // Emergency buffer is funded by available cash (first-line defense)
+    const emergencyFunded   = Math.min(availableCash, emergencyBufferTarget);
+    const emergencyProgress = Math.round(Math.min(100, (emergencyFunded / Math.max(emergencyBufferTarget, 1)) * 100));
+
+    const operatingProgress = Math.round(Math.min(100, (currentBuffer / Math.max(operatingBufferTarget, 1)) * 100));
+    const targetProgress    = Math.round(Math.min(100, (currentBuffer / Math.max(targetBufferAmount,    1)) * 100));
+
+    // ── 6. Derived KPIs ───────────────────────────────────────────────────────
+    /** How many days the current cash covers at the daily operating cost without earning anything */
+    const daysCovered = dailyOperatingCost > 0 ? availableCash / dailyOperatingCost : 0;
+
+    /** Net change in cash per day if current income/expense averages hold */
+    const dailyNetFlow = avgDailyIncome - dailyOperatingCost;
+
+    /** avgDailyIncome − dailyOperatingCost: what's left per day to save/pay debts */
+    const dailySavingsCapacity = dailyNetFlow;
+    const savingsCapacityRating =
+        dailySavingsCapacity >= 700 ? 'excellent' :
+        dailySavingsCapacity >= 300 ? 'good'      : 'poor';
+
+    // ── 7. Cash Flow Gap (redefined per spec) ────────────────────────────────
+    // = Target Buffer + Upcoming Bills + Remaining Debts − Available Cash
+    // Negative result → Financially Safe (never show negative to user)
+    const rawGap      = targetBufferAmount + upcomingBillsTotal + remainingDebt - availableCash;
+    const cashFlowGap = rawGap;
+    const isFinanciallySafe = rawGap <= 0;
+
+    // ── 8. Payroll ────────────────────────────────────────────────────────────
+    const nextPayroll      = getNextPayroll(settings.payroll_days, now);
+    const daysUntilPayroll = nextPayroll ? Math.round((nextPayroll - now) / 86400000) : null;
+
+    // Daily target = Cash Flow Gap ÷ remaining days until next payout
+    const dailyTarget = (daysUntilPayroll && daysUntilPayroll > 0 && rawGap > 0)
+        ? rawGap / daysUntilPayroll
+        : 0;
+
+    // ── 9. Forecast ───────────────────────────────────────────────────────────
+    // Project balance forward using trailing average net flow (income − operating cost).
+    // This is cash-flow based, NOT payout-based — income continues every day.
+    const projectedCashIn7Days = availableCash + dailyNetFlow * 7;
+
+    const projectedCashOnNextPayday = daysUntilPayroll !== null
+        ? availableCash + dailyNetFlow * daysUntilPayroll
+        : null;
+
+    // On payday the expected payroll credit arrives as well
+    const projectedCashOnNextPaydayWithPayroll = projectedCashOnNextPayday !== null
+        ? projectedCashOnNextPayday + settings.expected_payroll
+        : null;
+
+    // Days until cash runs out (only if net flow is negative)
+    let estimatedRunOutDate = null;
+    if (dailyNetFlow < 0 && availableCash > 0) {
+        const days = Math.floor(availableCash / (-dailyNetFlow));
+        const d = new Date(now); d.setDate(d.getDate() + days);
+        estimatedRunOutDate = ymd(d);
+    }
+
+    // Estimated debt-free date (savings capacity applied to remaining debt)
+    let estimatedDebtFreeDate = null;
+    if (remainingDebt > 0 && dailySavingsCapacity > 0) {
+        const days = Math.ceil(remainingDebt / dailySavingsCapacity);
+        const d = new Date(now); d.setDate(d.getDate() + days);
+        estimatedDebtFreeDate = ymd(d);
+    }
+
+    // Estimated date to reach target buffer
+    let estimatedBufferDate = null;
+    const bufferDeficit = Math.max(0, targetBufferAmount - currentBuffer);
+    if (bufferDeficit > 0 && dailySavingsCapacity > 0) {
+        const days = Math.ceil(bufferDeficit / dailySavingsCapacity);
+        const d = new Date(now); d.setDate(d.getDate() + days);
+        estimatedBufferDate = ymd(d);
+    }
+
+    // ── 10. Month-to-date totals (for cards that show MTD) ───────────────────
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const { data: monthTx } = await supabase
+        .from('transactions').select('type, amount')
+        .eq('user_id', uid).gte('created_at', monthStart.toISOString());
+
+    let monthlyIncome = 0, monthlyExpense = 0;
+    (monthTx || []).forEach(t => {
+        if (t.type === 'income') monthlyIncome += parseFloat(t.amount) || 0;
+        else                     monthlyExpense += parseFloat(t.amount) || 0;
+    });
+    const netCashFlow = monthlyIncome - monthlyExpense;
+
+    // ── 11. Financial Health Score ────────────────────────────────────────────
+    const healthScore = computeHealthScore({
+        availableCash, remainingDebt, avgDailyIncome, dailyOperatingCost,
+        emergencyBufferTarget, operatingBufferTarget,
+        currentBuffer, upcomingBillsTotal, dailySavingsCapacity, incomeStabilityPct
+    });
+
+    const healthMessages = {
+        green:  'Cash flow is healthy. Keep building your buffer.',
+        yellow: 'Monitor your spending. Savings capacity needs attention.',
+        red:    'Cash flow risk detected. Focus on reducing expenses or increasing income.',
+        blue:   'Good progress. Stay consistent and build toward your target buffer.'
+    };
+
+    return {
+        // ── Core ──
+        availableCash, dailyOperatingCost,
+        daysCovered, dailyNetFlow,
+        avgDailyIncome, avgDailyExpense,
+        dailySavingsCapacity, savingsCapacityRating,
+        totalIncomeLast30, totalExpenseLast30,
+        incomeBySource, incomeStabilityPct,
+
+        // ── Monthly ──
+        monthlyIncome, monthlyExpense, netCashFlow,
+
+        // ── Three-level buffer ──
+        currentBuffer,
+        emergencyBuffer: {
+            target: emergencyBufferTarget,
+            current: emergencyFunded,
+            remaining: Math.max(0, emergencyBufferTarget - emergencyFunded),
+            progress: emergencyProgress,
+            isFunded: availableCash >= emergencyBufferTarget
+        },
+        operatingBuffer: {
+            target: Math.round(operatingBufferTarget),
+            current: currentBuffer,
+            remaining: Math.max(0, operatingBufferTarget - currentBuffer),
+            progress: operatingProgress,
+            isFunded: currentBuffer >= operatingBufferTarget
+        },
+        targetBuffer: {
+            target: targetBufferAmount,
+            current: currentBuffer,
+            remaining: Math.max(0, targetBufferAmount - currentBuffer),
+            progress: targetProgress,
+            isFunded: currentBuffer >= targetBufferAmount
+        },
+
+        // ── Bills vs Debts (Phase 2) ──
+        bills: billsEnriched,
+        upcomingBillsTotal,
+        debts,
+        remainingDebt,
+
+        // ── Cash Flow Gap ──
+        cashFlowGap,
+        isFinanciallySafe,
+        dailyTarget,
+
+        // ── Payroll ──
+        nextPayrollDate: nextPayroll ? ymd(nextPayroll) : null,
+        daysUntilPayroll,
+        expectedPayroll: settings.expected_payroll,
+
+        // ── Forecast (Phase 4) ──
+        forecast: {
+            projectedCashIn7Days,
+            projectedCashOnNextPayday,
+            projectedCashOnNextPaydayWithPayroll,
+            estimatedDebtFreeDate,
+            estimatedBufferDate,
+            estimatedRunOutDate,
+            dailyNetFlow
+        },
+
+        // ── Health Score (Phase 4) ──
+        healthScore,
+        health: healthScore.color === 'blue' ? 'green' : healthScore.color,
+        healthMessage: healthMessages[healthScore.color] || healthMessages.yellow,
+
+        settings
+    };
+}
+
+// ── GET /api/engine/snapshot — single source of truth for all KPIs ────────────
+app.get('/api/engine/snapshot', requireAuth, async (req, res) => {
+    try {
+        const snapshot = await computeFinancialSnapshot(req.user.id);
+        res.json(snapshot);
+    } catch (e) {
+        console.error('Engine snapshot error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── BILLS CRUD (Phase 2) — recurring monthly obligations ─────────────────────
+// Stored in the existing liabilities table with liability_type = 'bill'.
+// All existing debt-related endpoints (liabilities, liabilities/summary, /pay)
+// continue to work unchanged because they never filter on liability_type.
+
+app.get('/api/bills', requireAuth, async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('liabilities').select('*')
+            .eq('user_id', req.user.id)
+            .eq('liability_type', 'bill')
+            .order('due_day', { ascending: true, nullsFirst: false });
+        if (error) throw error;
+        const now = new Date(); now.setHours(0, 0, 0, 0);
+        const enriched = (data || []).map(b => {
+            const nextDue      = b.due_day ? getNextDueDate(parseInt(b.due_day), now) : null;
+            const daysUntilDue = nextDue ? Math.round((nextDue - now) / 86400000) : null;
+            return Object.assign({}, b, { nextDueDate: nextDue ? ymd(nextDue) : null, daysUntilDue });
+        });
+        res.json(enriched);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/bills', requireAuth, async (req, res) => {
+    try {
+        const { name, amount, due_day } = req.body;
+        if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
+        if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'amount must be a positive number' });
+
+        const payload = {
+            name: name.trim(), amount: parseFloat(amount),
+            due_day:         due_day ? parseInt(due_day, 10) : null,
+            liability_type: 'bill',
+            original_amount: parseFloat(amount),
+            user_id: req.user.id
+        };
+        const { data, error } = await supabase.from('liabilities').insert([payload]).select();
+        if (error) throw error;
+        res.status(201).json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/bills/:id', requireAuth, async (req, res) => {
+    try {
+        const { name, amount, due_day } = req.body;
+        const updates = {};
+        if (name    !== undefined) { if (!name.trim()) return res.status(400).json({ error: 'name is required' }); updates.name = name.trim(); }
+        if (amount  !== undefined) { if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'invalid amount' }); updates.amount = parseFloat(amount); updates.original_amount = parseFloat(amount); }
+        if (due_day !== undefined) updates.due_day = due_day !== '' ? parseInt(due_day, 10) : null;
+
+        const { data, error } = await supabase.from('liabilities')
+            .update(updates).eq('id', req.params.id).eq('user_id', req.user.id).eq('liability_type', 'bill').select();
+        if (error) throw error;
+        if (!data?.length) return res.status(404).json({ error: 'Bill not found' });
+        res.json(data[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/bills/:id reuses the existing DELETE /api/liabilities/:id endpoint —
+// no separate route needed since the check is on id + user_id.
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Finance Tracker running on http://localhost:${PORT}`));
