@@ -98,31 +98,19 @@
         .page-subtitle { font-size: 0.75rem; color: var(--muted); margin-top: 1px; }
 
         /* ── Balance Card ── */
-        /* Sticky wrapper: keeps the card's original spacing (16px 18px 0, matching
-           the old margin) so unpinned layout is pixel-identical to before. Position:
-           sticky lets the card keep its normal document-flow slot (no placeholder
-           needed, no content jump) while pinning to the top once scrolled past. */
+        /* The card is the sticky element itself — no wrapper, no background behind
+           it. Verified empirically: position:sticky with top:0 still pins the card
+           flush to the very top even though it has margin-top — the margin isn't
+           re-introduced as a gap once stuck — so the area around/behind the card
+           stays fully transparent, letting content scroll underneath it. */
         #balance-sentinel { height: 1px; }
-        .balance-sticky-zone {
-            position: sticky; top: 0; z-index: 40;
-            padding: 16px 18px 0;
-            background: var(--bg);
-            transition: box-shadow 0.25s ease;
-        }
-        .balance-sticky-zone.is-pinned {
-            /* Fully opaque (not translucent) — the card scales down from a top
-               origin, which opens a thin gap at its bottom edge within this box;
-               an opaque background fully covers that gap instead of letting
-               whatever is scrolling underneath bleed through it. */
-            background: var(--bg);
-            box-shadow: 0 6px 18px rgba(15,23,42,0.10);
-        }
         .balance-card {
-            background: var(--primary); margin: 0; border-radius: var(--radius-lg); padding: 22px 22px 20px; color: white; position: relative; overflow: hidden;
+            position: sticky; top: 0; z-index: 40;
+            background: var(--primary); margin: 16px 18px 0; border-radius: var(--radius-lg); padding: 22px 22px 20px; color: white; overflow: hidden;
             transform-origin: top center; will-change: transform;
             transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), box-shadow 0.25s cubic-bezier(0.4,0,0.2,1);
         }
-        .balance-sticky-zone.is-pinned .balance-card {
+        .balance-card.is-pinned {
             transform: scale(0.98);
             box-shadow: 0 10px 26px rgba(15,23,42,0.20), 0 3px 10px rgba(15,23,42,0.12);
         }
@@ -692,12 +680,10 @@
         </div>
 
         <div id="balance-sentinel"></div>
-        <div class="balance-sticky-zone" id="balance-sticky-zone">
-            <div class="balance-card">
-                <div class="balance-label">Total Balance</div>
-                <div class="balance-amount" id="val-balance">&#x20B1;0.00</div>
-                <div class="balance-period">All accounts</div>
-            </div>
+        <div class="balance-card">
+            <div class="balance-label">Total Balance</div>
+            <div class="balance-amount" id="val-balance">&#x20B1;0.00</div>
+            <div class="balance-period">All accounts</div>
         </div>
 
         <div class="filter-row" id="timeframe-container">
@@ -3535,9 +3521,9 @@
 (function () {
     'use strict';
 
-    var nav        = document.querySelector('.bottom-nav');
-    var sentinel   = document.getElementById('balance-sentinel');
-    var stickyZone = document.getElementById('balance-sticky-zone');
+    var nav      = document.querySelector('.bottom-nav');
+    var sentinel = document.getElementById('balance-sentinel');
+    var card     = document.querySelector('.balance-card');
 
     if (!nav && !sentinel) return; // nothing to enhance
 
@@ -3552,11 +3538,11 @@
 
         // ── Sticky balance card: toggle "pinned" visuals once it's actually stuck ──
         // (position:sticky handles the pinning itself; this just detects it so we
-        // can layer on the shadow/scale/blur without any manual position math.)
-        if (sentinel && stickyZone) {
+        // can layer on the shadow/scale without any manual position math.)
+        if (sentinel && card) {
             var isPinned = sentinel.getBoundingClientRect().bottom <= 0;
-            if (isPinned !== stickyZone.classList.contains('is-pinned')) {
-                stickyZone.classList.toggle('is-pinned', isPinned);
+            if (isPinned !== card.classList.contains('is-pinned')) {
+                card.classList.toggle('is-pinned', isPinned);
             }
         }
 
