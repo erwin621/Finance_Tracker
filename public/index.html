@@ -18,6 +18,8 @@
             --text: #1E2532; --text-sub: #4B5563; --muted: #9CA3AF;
             --success: #059669; --success-bg: #ECFDF5;
             --danger: #DC2626; --danger-bg: #FEF2F2;
+            --warning: #D97706; --warning-bg: #FFFBEB;
+            --purple: #7C3AED; --purple-bg: #F5F3FF;
             --border: #E5E9F2;
             --radius-sm: 10px; --radius: 14px; --radius-lg: 20px;
             --shadow-sm: 0 1px 3px rgba(0,0,0,0.07); --shadow: 0 2px 8px rgba(0,0,0,0.08);
@@ -133,9 +135,12 @@
         .stat-icon.income-icon  { background: var(--success-bg); color: var(--success); }
         .stat-icon.expense-icon { background: var(--danger-bg);  color: var(--danger);  }
         .stat-icon.savings-icon { background: var(--primary-light); color: var(--primary); }
+        .stat-icon.cod-icon     { background: var(--warning-bg); color: var(--warning); }
+        .stat-icon.payout-icon  { background: var(--primary-light); color: var(--primary); }
         .stat-label { font-size: 0.62rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
         .stat-val { font-size: 0.82rem; font-weight: 700; }
         .stat-val.positive { color: var(--success); } .stat-val.negative { color: var(--danger); } .stat-val.neutral { color: var(--primary); }
+        .stat-val.cod-warning { color: var(--warning); }
 
         /* ── Section Head ── */
         .section-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 18px 10px; }
@@ -148,12 +153,16 @@
         .tx-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .tx-icon.income  { background: var(--success-bg); color: var(--success); }
         .tx-icon.expense { background: var(--danger-bg);  color: var(--danger);  }
+        .tx-icon.cod_collection { background: var(--warning-bg); color: var(--warning); }
+        .tx-icon.cod_remittance { background: var(--purple-bg);  color: var(--purple);  }
         .tx-body  { flex: 1; min-width: 0; }
         .tx-desc  { font-size: 0.875rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .tx-meta  { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
         .tx-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
         .tx-amount { font-size: 0.875rem; font-weight: 700; }
         .tx-amount.positive { color: var(--success); } .tx-amount.negative { color: var(--danger); }
+        .tx-amount.cod-collection-amt { color: var(--warning); }
+        .tx-amount.cod-remittance-amt { color: var(--purple); }
         .btn-edit { background: none; border: none; cursor: pointer; color: var(--muted); padding: 2px; display: flex; align-items: center; transition: color 0.15s; }
         .btn-edit:hover { color: var(--primary); }
 
@@ -325,6 +334,8 @@
         .cat-badge.income  { background: var(--success-bg); color: var(--success); }
         .cat-badge.expense { background: var(--danger-bg);  color: var(--danger);  }
         .cat-badge.both    { background: var(--primary-light); color: var(--primary); }
+        .cat-badge.cod_collection { background: var(--warning-bg); color: var(--warning); }
+        .cat-badge.cod_remittance { background: var(--purple-bg);  color: var(--purple);  }
         .profile-name  { font-size: 0.95rem; font-weight: 700; margin-bottom: 2px; }
         .profile-email { font-size: 0.75rem; color: var(--muted); }
         .profile-section-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); margin: 18px 0 8px; }
@@ -362,10 +373,15 @@
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .modal-handle { width: 36px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 18px; }
         .modal-title  { font-size: 1rem; font-weight: 700; margin-bottom: 20px; }
-        .type-toggle { display: grid; grid-template-columns: 1fr 1fr; background: var(--border); border-radius: var(--radius-sm); padding: 3px; gap: 3px; margin-bottom: 16px; }
-        .type-btn { padding: 10px; border: none; border-radius: 8px; font-family: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: transparent; color: var(--muted); transition: all 0.15s; }
-        .type-btn.active.income  { background: var(--surface); color: var(--success); box-shadow: var(--shadow-sm); }
-        .type-btn.active.expense { background: var(--surface); color: var(--danger); box-shadow: var(--shadow-sm); }
+        .type-toggle { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; background: var(--border); border-radius: var(--radius-sm); padding: 4px; margin-bottom: 16px; }
+        .type-toggle::-webkit-scrollbar { display: none; }
+        .type-btn { flex: 1 0 auto; padding: 10px 13px; border: none; border-radius: 8px; font-family: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; background: transparent; color: var(--muted); white-space: nowrap; transition: all 0.15s; }
+        .type-btn.active.income         { background: var(--surface); color: var(--success); box-shadow: var(--shadow-sm); }
+        .type-btn.active.expense        { background: var(--surface); color: var(--danger);  box-shadow: var(--shadow-sm); }
+        .type-btn.active.transfer       { background: var(--surface); color: var(--primary); box-shadow: var(--shadow-sm); }
+        .type-btn.active.cod_collection { background: var(--surface); color: var(--warning); box-shadow: var(--shadow-sm); }
+        .type-btn.active.cod_remittance { background: var(--surface); color: var(--purple);  box-shadow: var(--shadow-sm); }
+        .form-row.single { grid-template-columns: 1fr; }
         .form-group  { margin-bottom: 14px; }
         .form-label  { display: block; font-size: 0.75rem; font-weight: 600; color: var(--text-sub); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.4px; }
         .control { width: 100%; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); font-family: inherit; font-size: 0.95rem; color: var(--text); outline: none; transition: border-color 0.15s; }
@@ -390,6 +406,8 @@
         .kpi-val.positive { color: var(--success); }
         .kpi-val.negative { color: var(--danger); }
         .kpi-val.neutral  { color: var(--primary); }
+        .kpi-val.cod-warning { color: var(--warning); }
+        .kpi-val.cod-purple  { color: var(--purple); }
         .kpi-sub { font-size: 0.64rem; color: var(--muted); margin-top: 2px; }
 
         /* Health Banner */
@@ -725,6 +743,19 @@
             </div>
         </div>
 
+        <div class="stat-row" style="grid-template-columns:1fr 1fr;">
+            <div class="stat-card">
+                <div class="stat-icon cod-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg></div>
+                <div class="stat-label">Outstanding COD</div>
+                <div class="stat-val cod-warning" id="val-cod-outstanding">&#x20B1;0.00</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon payout-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div>
+                <div class="stat-label">Pending Payout</div>
+                <div class="stat-val neutral" id="val-pending-payout">&#x20B1;0.00</div>
+            </div>
+        </div>
+
         <div class="section-head">
             <div class="section-title">Recent Activity</div>
             <div class="section-link" onclick="switchView('tx', document.querySelectorAll('.nav-item')[1])">See all</div>
@@ -975,6 +1006,8 @@
                         <option value="expense">Expense</option>
                         <option value="income">Income</option>
                         <option value="both">Both</option>
+                        <option value="cod_collection">COD Collection</option>
+                        <option value="cod_remittance">COD Remittance</option>
                     </select></div>
                 </div>
                 <div style="display:flex; gap:8px;">
@@ -1583,6 +1616,8 @@
                 <div class="kpi-card"><div class="kpi-label">Expenses</div><div class="kpi-val negative" id="rep-expense">&#x20B1;0.00</div></div>
                 <div class="kpi-card"><div class="kpi-label">Net</div><div class="kpi-val" id="rep-net">&#x20B1;0.00</div></div>
                 <div class="kpi-card"><div class="kpi-label">Fuel</div><div class="kpi-val" id="rep-fuel">&#x20B1;0.00</div></div>
+                <div class="kpi-card"><div class="kpi-label">COD Collected</div><div class="kpi-val cod-warning" id="rep-cod-collected">&#x20B1;0.00</div></div>
+                <div class="kpi-card"><div class="kpi-label">COD Remitted</div><div class="kpi-val cod-purple" id="rep-cod-remitted">&#x20B1;0.00</div></div>
             </div>
             <div class="report-export-row">
                 <button class="btn-export" onclick="exportReportPDF()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>PDF</button>
@@ -1732,24 +1767,34 @@
             <div class="modal-handle"></div>
             <div class="modal-title" id="modal-title">Add Transaction</div>
             <div class="type-toggle" id="type-toggle">
-                <button class="type-btn active income"  onclick="setType('income', this)">&#x2191; Income</button>
-                <button class="type-btn expense"         onclick="setType('expense',this)">&#x2193; Expense</button>
+                <button class="type-btn active income"  data-type="income"         onclick="setType('income')">&#x2191; Income</button>
+                <button class="type-btn expense"        data-type="expense"        onclick="setType('expense')">&#x2193; Expense</button>
+                <button class="type-btn transfer" id="type-btn-transfer" data-type="transfer" onclick="setType('transfer')">Transfer</button>
+                <button class="type-btn cod_collection"  data-type="cod_collection" onclick="setType('cod_collection')">COD Collection</button>
+                <button class="type-btn cod_remittance"  data-type="cod_remittance" onclick="setType('cod_remittance')">COD Remittance</button>
             </div>
             <div class="form-group">
                 <label class="form-label">Description</label>
                 <input type="text" class="control" id="f-desc" placeholder="e.g. Delivery Payout">
             </div>
-            <div class="form-row">
+            <div class="form-row" id="f-account-row">
                 <div class="form-group">
-                    <label class="form-label">Account</label>
-                    <select class="control" id="f-account"></select>
+                    <label class="form-label" id="f-account-label">Account</label>
+                    <select class="control" id="f-account" onchange="validateAccountPair()"></select>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Amount</label>
-                    <input type="number" class="control" id="f-amount" placeholder="0.00" min="0.01" step="0.01">
+                <div class="form-group" id="f-account-to-group" style="display:none;">
+                    <label class="form-label">To Account</label>
+                    <select class="control" id="f-account-to" onchange="validateAccountPair()"></select>
                 </div>
             </div>
+            <div id="f-account-same-error" style="font-size:0.78rem;color:var(--danger);margin:-8px 0 10px;display:none;">
+                Source and destination must be different accounts.
+            </div>
             <div class="form-group">
+                <label class="form-label">Amount</label>
+                <input type="number" class="control" id="f-amount" placeholder="0.00" min="0.01" step="0.01">
+            </div>
+            <div class="form-group" id="f-category-group">
                 <label class="form-label">Category <span style="color:var(--muted);font-weight:400;text-transform:none;">(optional)</span></label>
                 <select class="control" id="f-category">
                     <option value="">— No category —</option>
@@ -1757,36 +1802,6 @@
             </div>
             <button class="btn-primary" id="btn-save" onclick="saveTransaction()">Save Transaction</button>
             <button class="btn-ghost" onclick="toggleModal(false)">Cancel</button>
-        </div>
-    </div>
-    <!-- ─── TRANSFER MODAL ─── -->
-    <div class="modal" id="transfer-modal" onclick="if(event.target===this)closeTransferModal()">
-        <div class="modal-sheet">
-            <div class="modal-handle"></div>
-            <div class="modal-title">Transfer Funds</div>
-
-            <div class="form-group">
-                <label class="form-label">From Account</label>
-                <select class="control" id="t-from" onchange="validateTransferAccounts()"></select>
-            </div>
-            <div class="form-group">
-                <label class="form-label">To Account</label>
-                <select class="control" id="t-to" onchange="validateTransferAccounts()"></select>
-            </div>
-            <div id="transfer-same-error" style="font-size:0.78rem;color:var(--danger);margin:-8px 0 10px;display:none;">
-                Source and destination must be different accounts.
-            </div>
-            <div class="form-group">
-                <label class="form-label">Amount</label>
-                <input type="number" class="control" id="t-amount" placeholder="0.00" min="0.01" step="0.01">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Description <span style="color:var(--muted);font-weight:400;text-transform:none;">(optional)</span></label>
-                <input type="text" class="control" id="t-desc" placeholder="e.g. Savings allocation">
-            </div>
-
-            <button class="btn-primary" id="btn-transfer" onclick="saveTransfer()">Transfer Funds</button>
-            <button class="btn-ghost" onclick="closeTransferModal()">Cancel</button>
         </div>
     </div>
     <!-- ─── CONTRIBUTE TO GOAL MODAL ─── -->
@@ -2189,32 +2204,61 @@
     }
 
     // ── Type Toggle ───────────────────────────────────────────────────────────
-    function setType(type, btn) {
+    function setType(type) {
         currentType = type;
-        document.querySelectorAll('#type-toggle .type-btn').forEach(function(b){ b.classList.remove('active'); });
-        btn.classList.add('active');
-        refreshCategoryDropdown(type);
+        document.querySelectorAll('#type-toggle .type-btn').forEach(function(b){
+            b.classList.toggle('active', b.getAttribute('data-type') === type);
+        });
+        updateFormForType(type);
+    }
+
+    // Shows/hides the fields that differ by transaction type (To Account,
+    // Category) and relabels/refreshes what's left. Called whenever the type
+    // changes and once when the modal opens.
+    function updateFormForType(type) {
+        var isTransfer = type === 'transfer';
+        document.getElementById('f-account-label').textContent = isTransfer ? 'From Account' : 'Account';
+        document.getElementById('f-account-row').classList.toggle('single', !isTransfer);
+        document.getElementById('f-account-to-group').style.display = isTransfer ? 'block' : 'none';
+        document.getElementById('f-category-group').style.display   = isTransfer ? 'none'  : 'block';
+        document.getElementById('btn-save').textContent = isTransfer ? 'Transfer Funds' : (editingId ? 'Update Transaction' : 'Save Transaction');
+        if (!isTransfer) refreshCategoryDropdown(type);
+        validateAccountPair();
+    }
+
+    // Transfers need two different accounts. This mirrors the validation the
+    // old standalone Transfer modal had, now generalized to the unified form.
+    function validateAccountPair() {
+        var errEl = document.getElementById('f-account-same-error');
+        var btn   = document.getElementById('btn-save');
+        if (currentType !== 'transfer') { errEl.style.display = 'none'; btn.disabled = false; return; }
+        var same = document.getElementById('f-account').value && document.getElementById('f-account').value === document.getElementById('f-account-to').value;
+        errEl.style.display = same ? 'block' : 'none';
+        btn.disabled = !!same;
     }
 
     // ── Transaction Modal ─────────────────────────────────────────────────────
     function toggleModal(show, txData) {
         document.getElementById('tx-modal').classList.toggle('active', show);
         if (!show) { editingId = null; resetForm(); return; }
+        populateAccountDropdowns();
         loadCategories();          // refresh category list on open
+        // Transfers aren't editable, so don't offer switching an existing
+        // Income/Expense/COD entry into a Transfer mid-edit.
+        document.getElementById('type-btn-transfer').style.display = txData ? 'none' : '';
         if (txData) {
             editingId = txData.id;
             document.getElementById('modal-title').textContent = 'Edit Transaction';
             document.getElementById('f-desc').value    = txData.description || '';
             document.getElementById('f-account').value = txData.account_id;
             document.getElementById('f-amount').value  = txData.amount;
-            currentType = txData.type;
-            document.querySelectorAll('#type-toggle .type-btn').forEach(function(b){
-                b.classList.toggle('active', b.classList.contains(txData.type));
-            });
+            setType(txData.type);
             // Set category after dropdown is populated (slight delay for async)
             setTimeout(function(){
                 document.getElementById('f-category').value = txData.category_id || '';
             }, 100);
+        } else {
+            setType('income');
         }
     }
 
@@ -2223,10 +2267,7 @@
         document.getElementById('f-desc').value     = '';
         document.getElementById('f-amount').value   = '';
         document.getElementById('f-category').value = '';
-        currentType = 'income';
-        document.querySelectorAll('#type-toggle .type-btn').forEach(function(b){
-            b.classList.toggle('active', b.classList.contains('income'));
-        });
+        setType('income');
     }
 
     // ── Render Helpers ────────────────────────────────────────────────────────
@@ -2261,18 +2302,24 @@
                     '</div></div>';
             }
 
-            const isInc  = item.type === 'income';
+            // Icon + sign + optional badge per transaction type. Income/Expense are
+            // unchanged from before; COD Collection/Remittance get their own accent
+            // color so they read as visually distinct from real income/expense.
+            const TX_META = {
+                income:         { cls: 'income',  sign: '+', amtCls: 'positive', icon: '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>' },
+                expense:        { cls: 'expense', sign: '-', amtCls: 'negative', icon: '<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>' },
+                cod_collection: { cls: 'cod_collection', sign: '+', amtCls: 'cod-collection-amt', icon: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>', badge: 'COD Collection', badgeColor: 'var(--warning)', badgeBg: 'var(--warning-bg)' },
+                cod_remittance: { cls: 'cod_remittance', sign: '-', amtCls: 'cod-remittance-amt', icon: '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>', badge: 'COD Remittance', badgeColor: 'var(--purple)', badgeBg: 'var(--purple-bg)' }
+            };
+            const meta   = TX_META[item.type] || TX_META.expense;
             const txJson = JSON.stringify(item).replace(/'/g, '&#39;');
             return '<div class="tx-card">' +
-                '<div class="tx-icon ' + (isInc ? 'income' : 'expense') + '">' +
-                (isInc
-                    ? '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>'
-                    : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>') +
-                '</div>' +
+                '<div class="tx-icon ' + meta.cls + '"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' + meta.icon + '</svg></div>' +
                 '<div class="tx-body"><div class="tx-desc">' + (item.description || 'No description') + '</div>' +
                 '<div class="tx-meta">' + dateStr + ' &middot; ' + (item.accounts ? item.accounts.name : 'Account') + (getCategoryName(item.category_id) ? ' &middot; ' + getCategoryName(item.category_id) : '') + '</div></div>' +
                 '<div class="tx-right">' +
-                '<span class="tx-amount ' + (isInc ? 'positive' : 'negative') + '">' + (isInc ? '+' : '-') + fmt(item.amount) + '</span>' +
+                '<span class="tx-amount ' + meta.amtCls + '">' + meta.sign + fmt(item.amount) + '</span>' +
+                (meta.badge ? '<span style="font-size:0.65rem;color:' + meta.badgeColor + ';font-weight:600;background:' + meta.badgeBg + ';padding:1px 7px;border-radius:10px;margin-top:2px;">' + meta.badge + '</span>' : '') +
                 '<button class="btn-edit" onclick=\'toggleModal(true,' + txJson + ')\' title="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>' +
                 '</div></div>';
         }).join('');
@@ -2372,12 +2419,13 @@
             document.getElementById('val-income').textContent  = fmt(data.summary.income);
             document.getElementById('val-expense').textContent = fmt(data.summary.expense);
             document.getElementById('val-rate').textContent    = data.summary.savingsRate + '%';
+            document.getElementById('val-cod-outstanding').textContent = fmt(data.summary.outstandingCOD || 0);
+            document.getElementById('val-pending-payout').textContent  = fmt(data.summary.pendingPayout || 0);
 
-            const sel = document.getElementById('f-account');
-            sel.innerHTML = (data.accounts || []).map(function(a){ return '<option value="' + a.id + '">' + a.name + '</option>'; }).join('');
-
-            // Cache accounts for transfer modal
+            // Cache accounts, then populate both the single-account and transfer
+            // (From/To) dropdowns from the same source.
             _accounts = data.accounts || [];
+            populateAccountDropdowns();
 
             renderAccountsView(data.accounts, []);
 
@@ -2438,7 +2486,30 @@
         }
     }
 
+    // Populates BOTH account dropdowns (single Account, and Transfer's To
+    // Account) from the same cached account list, preserving whatever was
+    // already selected where possible.
+    function populateAccountDropdowns() {
+        var opts = (_accounts || []).map(function(a){
+            return '<option value="' + a.id + '">' + a.name + ' (' + fmt(a.balance) + ')</option>';
+        }).join('');
+        var selFrom = document.getElementById('f-account');
+        var selTo   = document.getElementById('f-account-to');
+        var prevFrom = selFrom.value, prevTo = selTo.value;
+        selFrom.innerHTML = opts;
+        selTo.innerHTML   = opts;
+        if (prevFrom) selFrom.value = prevFrom;
+        if (prevTo)   selTo.value   = prevTo;
+        if (currentType === 'transfer' && _accounts && _accounts.length >= 2 && selFrom.value === selTo.value) {
+            var other = _accounts.find(function(a){ return a.id !== selFrom.value; });
+            if (other) selTo.value = other.id;
+        }
+        validateAccountPair();
+    }
+
     async function saveTransaction() {
+        if (currentType === 'transfer') return saveTransferUnified();
+
         const amount = parseFloat(document.getElementById('f-amount').value);
         if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
 
@@ -2449,6 +2520,7 @@
             amount,
             category_id: document.getElementById('f-category').value || null
         };
+        if (!payload.account_id) { showToast('Select an account', 'error'); return; }
         const btn = document.getElementById('btn-save');
         btn.textContent = 'Saving...'; btn.disabled = true;
 
@@ -2467,6 +2539,40 @@
             showToast(e.message || 'Failed to save transaction', 'error');
         } finally {
             btn.textContent = 'Save Transaction'; btn.disabled = false;
+        }
+    }
+
+    // Transfer creation, folded into the unified modal. Behavior/endpoint is
+    // unchanged from the old standalone Transfer modal — only where it's
+    // triggered from has moved.
+    async function saveTransferUnified() {
+        var fromId = document.getElementById('f-account').value;
+        var toId   = document.getElementById('f-account-to').value;
+        var amount = parseFloat(document.getElementById('f-amount').value);
+        var desc   = document.getElementById('f-desc').value.trim();
+
+        if (!fromId || !toId) { showToast('Select both accounts', 'error'); return; }
+        if (fromId === toId) { showToast('Source and destination must be different accounts', 'error'); return; }
+        if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+
+        const btn = document.getElementById('btn-save');
+        btn.textContent = 'Transferring...'; btn.disabled = true;
+
+        try {
+            const res  = await apiFetch(API + '/transfers', {
+                method: 'POST',
+                body: JSON.stringify({ from_account_id: fromId, to_account_id: toId, amount: amount, description: desc })
+            });
+            const data = await res.json().catch(function(){ return {}; });
+            if (!res.ok) throw new Error(data.error || 'Transfer failed');
+            toggleModal(false);
+            showToast('Transfer complete!', 'success');
+            await Promise.all([loadAccounts(), loadDashboard(currentTimeframe)]);
+        } catch (e) {
+            console.error(e);
+            showToast(e.message || 'Transfer failed', 'error');
+        } finally {
+            btn.textContent = 'Transfer Funds'; btn.disabled = false;
         }
     }
 
@@ -2618,8 +2724,9 @@
             c.innerHTML = '<div class="empty-state" style="padding:16px 0 8px;">No categories yet. Add one below.</div>';
             return;
         }
+        const TYPE_LABELS = { income: 'Income', expense: 'Expense', both: 'Both', cod_collection: 'COD Collection', cod_remittance: 'COD Remittance' };
         c.innerHTML = _categories.map(function(cat) {
-            const badge = '<span class="cat-badge ' + cat.type + '">' + cat.type + '</span>';
+            const badge = '<span class="cat-badge ' + cat.type + '">' + (TYPE_LABELS[cat.type] || cat.type) + '</span>';
             return '<div class="settings-item-card" id="cat-card-' + cat.id + '">' +
                 '<div class="settings-item-row">' +
                     '<div class="settings-item-body"><div class="settings-item-name">' + cat.name + '</div><div style="margin-top:3px;">' + badge + '</div></div>' +
@@ -2632,9 +2739,11 @@
                         '<input type="text" class="control-sm" id="ec-name-' + cat.id + '" value="' + cat.name.replace(/"/g,'&quot;') + '"></div>' +
                         '<div><div style="font-size:0.7rem;font-weight:600;color:var(--text-sub);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.4px;">Type</div>' +
                         '<select class="control-sm" id="ec-type-' + cat.id + '">' +
-                            '<option value="expense"' + (cat.type==='expense'?' selected':'') + '>Expense</option>' +
-                            '<option value="income"'  + (cat.type==='income'?' selected':'')  + '>Income</option>' +
-                            '<option value="both"'    + (cat.type==='both'?' selected':'')    + '>Both</option>' +
+                            '<option value="expense"'        + (cat.type==='expense'?' selected':'')        + '>Expense</option>' +
+                            '<option value="income"'         + (cat.type==='income'?' selected':'')         + '>Income</option>' +
+                            '<option value="both"'           + (cat.type==='both'?' selected':'')           + '>Both</option>' +
+                            '<option value="cod_collection"' + (cat.type==='cod_collection'?' selected':'') + '>COD Collection</option>' +
+                            '<option value="cod_remittance"' + (cat.type==='cod_remittance'?' selected':'') + '>COD Remittance</option>' +
                         '</select></div>' +
                     '</div>' +
                     '<div style="display:flex;gap:8px;">' +
@@ -2715,72 +2824,17 @@
         sel.value = current; // restore if still valid
     }
 
-    // ── Transfer Modal ────────────────────────────────────────────────────────
+    // ── Transfer entry point (Accounts tab quick action) ──────────────────────
+    // The Transfer modal was folded into the unified transaction modal above;
+    // this just opens it pre-set to the Transfer type.
     function openTransferModal() {
         if (!_accounts || _accounts.length < 2) {
             showToast('You need at least 2 accounts to transfer.', 'error');
             return;
         }
-        populateTransferDropdowns();
-        document.getElementById('t-amount').value = '';
-        document.getElementById('t-desc').value   = '';
-        document.getElementById('transfer-same-error').style.display = 'none';
-        document.getElementById('transfer-modal').classList.add('active');
-    }
-
-    function closeTransferModal() {
-        document.getElementById('transfer-modal').classList.remove('active');
-    }
-
-    function populateTransferDropdowns() {
-        var opts = _accounts.map(function(a){
-            return '<option value="' + a.id + '">' + a.name + ' (' + fmt(a.balance) + ')</option>';
-        }).join('');
-        document.getElementById('t-from').innerHTML = opts;
-        document.getElementById('t-to').innerHTML   = opts;
-        // Default: first account → second account
-        if (_accounts.length >= 2) {
-            document.getElementById('t-from').value = _accounts[0].id;
-            document.getElementById('t-to').value   = _accounts[1].id;
-        }
-        document.getElementById('transfer-same-error').style.display = 'none';
-    }
-
-    function validateTransferAccounts() {
-        var same = document.getElementById('t-from').value === document.getElementById('t-to').value;
-        document.getElementById('transfer-same-error').style.display = same ? 'block' : 'none';
-        document.getElementById('btn-transfer').disabled = same;
-    }
-
-    async function saveTransfer() {
-        var fromId = document.getElementById('t-from').value;
-        var toId   = document.getElementById('t-to').value;
-        var amount = parseFloat(document.getElementById('t-amount').value);
-        var desc   = document.getElementById('t-desc').value.trim();
-
-        if (fromId === toId) { showToast('Source and destination must differ', 'error'); return; }
-        if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
-
-        var btn = document.getElementById('btn-transfer');
-        btn.textContent = 'Transferring...'; btn.disabled = true;
-
-        try {
-            var res = await apiFetch(API + '/transfers', {
-                method: 'POST',
-                body:   JSON.stringify({ from_account_id: fromId, to_account_id: toId, amount: amount, description: desc })
-            });
-            var data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Transfer failed');
-
-            closeTransferModal();
-            showToast('Transfer complete!', 'success');
-            // Refresh accounts (updates balances) and dashboard (adds to recent activity)
-            await Promise.all([loadAccounts(), loadDashboard(currentTimeframe)]);
-        } catch (e) {
-            showToast(e.message || 'Transfer failed', 'error');
-        } finally {
-            btn.textContent = 'Transfer Funds'; btn.disabled = false;
-        }
+        toggleModal(true);
+        setType('transfer');
+        populateAccountDropdowns();
     }
 
     // ── Today's Goal ──────────────────────────────────────────────────────────
@@ -3478,10 +3532,11 @@
                 setText('rep-income',fmt(data.summary.income));setText('rep-expense',fmt(data.summary.expense));
                 var netEl=document.getElementById('rep-net');if(netEl){netEl.textContent=fmt(data.summary.net);netEl.className='kpi-val '+(data.summary.net>=0?'positive':'negative');}
                 setText('rep-fuel',fmt(data.summary.fuelTotal));
+                setText('rep-cod-collected',fmt(data.summary.codCollected||0));setText('rep-cod-remitted',fmt(data.summary.codRemitted||0));
                 renderActivityList((data.transactions||[]).map(function(t){return Object.assign({},t,{_type:'transaction'});}), 'cf-report-tx-list');
             }).catch(function(e){showToast(e.message,'error');});
     }
-    function reportToCsvRows(){if(!_cfLastReport)return[];var rows=[['Date','Type','Category','Account','Description','Amount']];(_cfLastReport.transactions||[]).forEach(function(t){rows.push([new Date(t.created_at).toISOString().slice(0,10),t.type,t.category_name||'',(t.accounts&&t.accounts.name)||'',(t.description||'').replace(/[\r\n]+/g,' '),t.amount]);});rows.push([]);rows.push(['Summary']);rows.push(['Income',_cfLastReport.summary.income]);rows.push(['Expenses',_cfLastReport.summary.expense]);rows.push(['Net',_cfLastReport.summary.net]);rows.push(['Fuel Total',_cfLastReport.summary.fuelTotal]);return rows;}
+    function reportToCsvRows(){if(!_cfLastReport)return[];var rows=[['Date','Type','Category','Account','Description','Amount']];(_cfLastReport.transactions||[]).forEach(function(t){rows.push([new Date(t.created_at).toISOString().slice(0,10),t.type,t.category_name||'',(t.accounts&&t.accounts.name)||'',(t.description||'').replace(/[\r\n]+/g,' '),t.amount]);});rows.push([]);rows.push(['Summary']);rows.push(['Income',_cfLastReport.summary.income]);rows.push(['Expenses',_cfLastReport.summary.expense]);rows.push(['Net',_cfLastReport.summary.net]);rows.push(['Fuel Total',_cfLastReport.summary.fuelTotal]);rows.push(['COD Collected',_cfLastReport.summary.codCollected||0]);rows.push(['COD Remitted',_cfLastReport.summary.codRemitted||0]);return rows;}
     function downloadBlob(content,filename,mime){var blob=new Blob([content],{type:mime});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}
     function exportReportCSV(){if(!_cfLastReport){showToast('Generate a report first','error');return;}var rows=reportToCsvRows();var csv=rows.map(function(r){return r.map(function(v){var s=String(v==null?'':v);return /[",\n]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s;}).join(',');}).join('\r\n');downloadBlob(csv,'finance-report-'+Date.now()+'.csv','text/csv');}
     function exportReportExcel(){if(!_cfLastReport){showToast('Generate a report first','error');return;}var rows=reportToCsvRows();var html='<table>'+rows.map(function(r){return'<tr>'+r.map(function(v){return'<td>'+esc(v)+'</td>';}).join('')+'</tr>';}).join('')+'</table>';downloadBlob('\ufeff'+html,'finance-report-'+Date.now()+'.xls','application/vnd.ms-excel');}

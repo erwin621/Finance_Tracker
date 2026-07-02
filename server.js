@@ -145,6 +145,35 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 //
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ─── TRANSACTION TYPE REDESIGN — MIGRATION (additive, run once) ──────────────
+//
+//  Adds two new first-class transaction types: 'cod_collection' and
+//  'cod_remittance'. Both are stored in the EXISTING `transactions` table
+//  (same as 'income'/'expense') and the EXISTING `categories` table — no new
+//  tables required. Outstanding COD liability is computed on the fly as
+//  SUM(cod_collection) − SUM(cod_remittance), so it's always in sync with the
+//  transaction log and nothing needs to be manually maintained.
+//
+//  Run this ONLY if your `transactions.type` or `categories.type` columns
+//  have a CHECK constraint restricting allowed values (most Supabase setups
+//  created via the dashboard's table editor do NOT add one, in which case
+//  this is a no-op and safe to skip):
+//
+//  ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+//  ALTER TABLE categories   DROP CONSTRAINT IF EXISTS categories_type_check;
+//
+//  ── IMPORTANT BEHAVIOR CHANGE ──────────────────────────────────────────
+//  Previously, plain Income/Expense transactions did NOT adjust the
+//  account's balance (only Transfers and Debt payments did). This redesign
+//  fixes that so all five transaction types now keep account balances in
+//  sync automatically, matching the accounting rules requested. This means
+//  the FIRST time you edit or delete a pre-existing Income/Expense entry
+//  after deploying this update, the account balance will shift by that
+//  entry's amount (a one-time correction, since it was never applied when
+//  the entry was originally created). Do a quick balance sanity check on
+//  your accounts after deploying.
+// ──────────────────────────────────────────────────────────────────────────────
+
 // ── Auth Middleware ───────────────────────────────────────────────────────────
 async function requireAuth(req, res, next) {
     const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
@@ -256,6 +285,36 @@ app.get('/api/auth/me', async (req, res) => {
     }
 });
 
+// ── Transaction Type Redesign — shared helpers ─────────────────────────────────
+// Every transaction type maps to a signed effect on the account balance it's
+// posted against. 'transfer' is handled separately (its own table/endpoint,
+// unchanged). COD liability is NOT tracked here — it's derived on read as
+// SUM(cod_collection) − SUM(cod_remittance), so no explicit bookkeeping is
+// needed for it on create/edit/delete.
+const TRANSACTION_TYPES = ['income', 'expense', 'cod_collection', 'cod_remittance'];
+
+function balanceDeltaForType(type, amount) {
+    const amt = parseFloat(amount) || 0;
+    switch (type) {
+        case 'income':         return  amt;  // real earnings → increases balance
+        case 'expense':        return -amt;  // real spending → decreases balance
+        case 'cod_collection': return  amt;  // cash collected from a customer → increases balance
+        case 'cod_remittance': return -amt;  // remitting collected cash out    → decreases balance
+        default:                return 0;
+    }
+}
+
+// Applies a signed balance delta to an account. Pass a negative delta to
+// reverse a previously-applied effect (used when editing/deleting).
+async function adjustAccountBalance(uid, accountId, delta) {
+    if (!accountId || !delta) return;
+    const { data: accRows, error } = await supabase.from('accounts').select('balance').eq('id', accountId).eq('user_id', uid);
+    if (error) throw error;
+    if (!accRows?.length) return; // account no longer exists — nothing to adjust
+    const newBalance = (parseFloat(accRows[0].balance) || 0) + delta;
+    await supabase.from('accounts').update({ balance: newBalance }).eq('id', accountId).eq('user_id', uid);
+}
+
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 app.get('/api/dashboard', requireAuth, async (req, res) => {
     try {
@@ -286,13 +345,39 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         let totalBalance = 0;
         (accounts || []).forEach(a => { totalBalance += parseFloat(a.balance) || 0; });
 
+        // Income/Expense totals for the selected period. COD Collection and COD
+        // Remittance are intentionally excluded — they're not real income/expense,
+        // they're shown separately below.
         let income = 0, expense = 0;
         (allTx || []).forEach(tx => {
-            if (tx.type === 'income') income  += parseFloat(tx.amount) || 0;
-            else                      expense += parseFloat(tx.amount) || 0;
+            const amt = parseFloat(tx.amount) || 0;
+            if      (tx.type === 'income')  income  += amt;
+            else if (tx.type === 'expense') expense += amt;
         });
 
         const savingsRate = income > 0 ? Math.round(((income - expense) / income) * 100) : 0;
+
+        // Outstanding COD liability — an all-time running balance, independent of
+        // the dashboard's selected timeframe (it's the state of a liability "right
+        // now", not a period total). Derived from the transaction log itself:
+        // SUM(cod_collection) − SUM(cod_remittance).
+        const { data: codTx } = await supabase
+            .from('transactions').select('type, amount')
+            .eq('user_id', uid).in('type', ['cod_collection', 'cod_remittance']);
+        let codCollectedAllTime = 0, codRemittedAllTime = 0;
+        (codTx || []).forEach(t => {
+            const amt = parseFloat(t.amount) || 0;
+            if (t.type === 'cod_collection') codCollectedAllTime += amt;
+            else                             codRemittedAllTime += amt;
+        });
+        const outstandingCOD = Math.max(0, codCollectedAllTime - codRemittedAllTime);
+
+        // Pending Payout — current balance of the account(s) that look like a
+        // "Payout Wallet" (e.g. earnings waiting to be withdrawn from a delivery
+        // platform). Matched by name so no schema change is needed.
+        const pendingPayout = (accounts || [])
+            .filter(a => /payout/i.test(a.name || ''))
+            .reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
 
         // Fetch recent transfers for the same timeframe
         let trQuery = supabase.from('transfers')
@@ -304,7 +389,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         const { data: recentTransfers } = await trQuery;
 
         res.json({
-            summary: { totalBalance, income, expense, savingsRate },
+            summary: { totalBalance, income, expense, savingsRate, outstandingCOD, pendingPayout },
             accounts: accounts || [],
             recentTransactions: recent || [],
             recentTransfers:    recentTransfers || []
@@ -340,10 +425,11 @@ app.post('/api/transactions', requireAuth, async (req, res) => {
         const { account_id, type, amount, description, category_id, sites_completed, liability_id } = req.body;
 
         if (!account_id || !type || !amount) return res.status(400).json({ error: 'Missing required fields: account_id, type, amount' });
-        if (!['income', 'expense'].includes(type)) return res.status(400).json({ error: 'type must be "income" or "expense"' });
+        if (!TRANSACTION_TYPES.includes(type)) return res.status(400).json({ error: 'type must be one of: ' + TRANSACTION_TYPES.join(', ') });
         if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'amount must be a positive number' });
 
-        const payload = { account_id, type, amount: parseFloat(amount), description, user_id: uid };
+        const amt = parseFloat(amount);
+        const payload = { account_id, type, amount: amt, description, user_id: uid };
         if (category_id) payload.category_id = category_id;
         // Cash Flow module additions — both optional. sites_completed powers Income Tracking's
         // Primary Job quick-log; liability_id links a Debt Manager payment back to its debt.
@@ -352,6 +438,10 @@ app.post('/api/transactions', requireAuth, async (req, res) => {
 
         const { data, error } = await supabase.from('transactions').insert([payload]).select();
         if (error) throw error;
+
+        // Keep the account balance in sync with this transaction's real-world effect.
+        await adjustAccountBalance(uid, account_id, balanceDeltaForType(type, amt));
+
         res.status(201).json(data[0]);
     } catch (e) {
         res.status(500).json({ error: e.message || 'Failed to create transaction' });
@@ -365,10 +455,18 @@ app.put('/api/transactions/:id', requireAuth, async (req, res) => {
         const { account_id, type, amount, description, category_id, sites_completed, liability_id } = req.body;
 
         if (!account_id || !type || !amount) return res.status(400).json({ error: 'Missing required fields' });
-        if (!['income', 'expense'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
+        if (!TRANSACTION_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid type' });
         if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Invalid amount' });
 
-        const updates = { account_id, type, amount: parseFloat(amount), description };
+        const amt = parseFloat(amount);
+
+        // Fetch the existing row first so its old balance effect can be reversed.
+        const { data: existingRows, error: exErr } = await supabase.from('transactions').select('*').eq('id', id).eq('user_id', uid);
+        if (exErr) throw exErr;
+        if (!existingRows?.length) return res.status(404).json({ error: 'Transaction not found' });
+        const existing = existingRows[0];
+
+        const updates = { account_id, type, amount: amt, description };
         if (category_id !== undefined) updates.category_id = category_id || null;
         if (sites_completed !== undefined) updates.sites_completed = (sites_completed === '' || sites_completed === null) ? null : parseInt(sites_completed);
         if (liability_id !== undefined) updates.liability_id = liability_id || null;
@@ -377,6 +475,14 @@ app.put('/api/transactions/:id', requireAuth, async (req, res) => {
             .update(updates).eq('id', id).eq('user_id', uid).select();
         if (error) throw error;
         if (!data || data.length === 0) return res.status(404).json({ error: 'Transaction not found' });
+
+        // Reverse the old effect on its original account, then apply the new
+        // effect on the (possibly different) account. Correctly handles edits
+        // that change the amount, the type, and/or the account.
+        const oldDelta = balanceDeltaForType(existing.type, existing.amount);
+        await adjustAccountBalance(uid, existing.account_id, -oldDelta);
+        await adjustAccountBalance(uid, account_id, balanceDeltaForType(type, amt));
+
         res.json(data[0]);
     } catch (e) {
         res.status(500).json({ error: e.message || 'Failed to update transaction' });
@@ -387,8 +493,18 @@ app.put('/api/transactions/:id', requireAuth, async (req, res) => {
 app.delete('/api/transactions/:id', requireAuth, async (req, res) => {
     try {
         const uid = req.user.id, { id } = req.params;
+
+        const { data: existingRows } = await supabase.from('transactions').select('*').eq('id', id).eq('user_id', uid);
+        const existing = existingRows && existingRows[0];
+
         const { error } = await supabase.from('transactions').delete().eq('id', id).eq('user_id', uid);
         if (error) throw error;
+
+        if (existing) {
+            const delta = balanceDeltaForType(existing.type, existing.amount);
+            await adjustAccountBalance(uid, existing.account_id, -delta);
+        }
+
         res.status(204).send();
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -502,11 +618,13 @@ app.get('/api/categories', requireAuth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const CATEGORY_TYPES = ['income', 'expense', 'both', 'cod_collection', 'cod_remittance'];
+
 app.post('/api/categories', requireAuth, async (req, res) => {
     try {
         const { name, type } = req.body;
         if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-        if (!['income', 'expense', 'both'].includes(type)) return res.status(400).json({ error: 'type must be income, expense, or both' });
+        if (!CATEGORY_TYPES.includes(type)) return res.status(400).json({ error: 'type must be one of: ' + CATEGORY_TYPES.join(', ') });
         const { data, error } = await supabase.from('categories')
             .insert([{ name: name.trim(), type, user_id: req.user.id }]).select();
         if (error) throw error;
@@ -518,7 +636,7 @@ app.put('/api/categories/:id', requireAuth, async (req, res) => {
     try {
         const { name, type } = req.body;
         if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-        if (!['income', 'expense', 'both'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
+        if (!CATEGORY_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid type' });
         const { data, error } = await supabase.from('categories')
             .update({ name: name.trim(), type })
             .eq('id', req.params.id).eq('user_id', req.user.id).select();
@@ -909,7 +1027,13 @@ app.post('/api/categories/seed-defaults', requireAuth, async (req, res) => {
             { name: 'Utilities',       type: 'expense' },
             { name: 'Transportation',  type: 'expense' },
             { name: 'Medical',         type: 'expense' },
-            { name: 'Other',           type: 'expense' }
+            { name: 'Other',           type: 'expense' },
+            { name: 'COD Payment',          type: 'cod_collection' },
+            { name: 'Customer Cash',        type: 'cod_collection' },
+            { name: 'Cash Collection',      type: 'cod_collection' },
+            { name: 'ShopeePay Remittance', type: 'cod_remittance' },
+            { name: 'GCash Remittance',     type: 'cod_remittance' },
+            { name: 'MariBank Remittance',  type: 'cod_remittance' }
         ];
         const { data: existing } = await supabase.from('categories').select('name').eq('user_id', uid);
         const existingNames = new Set((existing || []).map(c => (c.name || '').trim().toLowerCase()));
@@ -957,7 +1081,8 @@ app.get('/api/cashflow/forecast', requireAuth, async (req, res) => {
         let monthlyIncome = 0, monthlyExpense = 0;
         (monthTx || []).forEach(t => {
             const a = parseFloat(t.amount) || 0;
-            if (t.type === 'income') monthlyIncome += a; else monthlyExpense += a;
+            if      (t.type === 'income')  monthlyIncome  += a;
+            else if (t.type === 'expense') monthlyExpense += a;
         });
         const netCashFlow = monthlyIncome - monthlyExpense;
 
@@ -1494,7 +1619,7 @@ app.get('/api/calendar', requireAuth, async (req, res) => {
         const pjCat   = (cats || []).find(c => /^primary job$/i.test((c.name || '').trim()));
 
         const days = {};
-        const ensure = (key) => { if (!days[key]) days[key] = { income: 0, expense: 0, fuel: 0, debtPayments: 0, payroll: 0, bufferDeposits: 0, transactions: [] }; return days[key]; };
+        const ensure = (key) => { if (!days[key]) days[key] = { income: 0, expense: 0, fuel: 0, debtPayments: 0, payroll: 0, bufferDeposits: 0, codCollection: 0, codRemittance: 0, transactions: [] }; return days[key]; };
 
         (tx || []).forEach(t => {
             const key = ymd(t.created_at);
@@ -1503,9 +1628,13 @@ app.get('/api/calendar', requireAuth, async (req, res) => {
             if (t.type === 'income') {
                 day.income += amt;
                 if (pjCat && t.category_id === pjCat.id) day.payroll += amt;
-            } else {
+            } else if (t.type === 'expense') {
                 day.expense += amt;
                 if (debtCat && t.category_id === debtCat.id) day.debtPayments += amt;
+            } else if (t.type === 'cod_collection') {
+                day.codCollection += amt;
+            } else if (t.type === 'cod_remittance') {
+                day.codRemittance += amt;
             }
             day.transactions.push(t);
         });
@@ -1617,13 +1746,19 @@ app.get('/api/reports', requireAuth, async (req, res) => {
             supabase.from('categories').select('*').eq('user_id', uid)
         ]);
 
-        let income = 0, expense = 0;
-        (tx || []).forEach(t => { const a = parseFloat(t.amount) || 0; if (t.type === 'income') income += a; else expense += a; });
+        let income = 0, expense = 0, codCollected = 0, codRemitted = 0;
+        (tx || []).forEach(t => {
+            const a = parseFloat(t.amount) || 0;
+            if      (t.type === 'income')         income       += a;
+            else if (t.type === 'expense')        expense      += a;
+            else if (t.type === 'cod_collection') codCollected += a;
+            else if (t.type === 'cod_remittance') codRemitted  += a;
+        });
         const fuelTotal = (fuel || []).reduce((s, f) => s + (parseFloat(f.cost) || 0), 0);
 
         res.json({
             range: { start, end },
-            summary: { income, expense, net: income - expense, fuelTotal },
+            summary: { income, expense, net: income - expense, fuelTotal, codCollected, codRemitted },
             transactions: (tx || []).map(t => Object.assign({}, t, {
                 category_name: (cats || []).find(c => c.id === t.category_id)?.name || ''
             })),
@@ -1925,8 +2060,9 @@ async function computeFinancialSnapshot(uid) {
 
     let monthlyIncome = 0, monthlyExpense = 0;
     (monthTx || []).forEach(t => {
-        if (t.type === 'income') monthlyIncome += parseFloat(t.amount) || 0;
-        else                     monthlyExpense += parseFloat(t.amount) || 0;
+        const amt = parseFloat(t.amount) || 0;
+        if      (t.type === 'income')  monthlyIncome  += amt;
+        else if (t.type === 'expense') monthlyExpense += amt;
     });
     const netCashFlow = monthlyIncome - monthlyExpense;
 
