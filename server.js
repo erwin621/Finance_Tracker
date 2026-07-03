@@ -145,6 +145,43 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 //
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ─── ATOMIC BALANCE UPDATES — MIGRATION (REQUIRED, run once) ─────────────────
+//
+//  Fixes a lost-update race condition: account/liability balances were
+//  previously updated by reading the current value in Node, then writing
+//  back current+delta as two separate round trips. If two transactions on
+//  the SAME account (or two payments on the same liability) were created
+//  close together — exactly what happens when testing several transaction
+//  types back-to-back — both requests could read the same starting value
+//  before either write landed, and whichever write finished last silently
+//  overwrote the other's effect. Symptom: an account's displayed balance
+//  reflects only ONE of several recent transactions instead of all of them.
+//
+//  This is fixed by doing the arithmetic inside a single atomic UPDATE in
+//  Postgres instead of in Node. Run this once in the Supabase SQL editor:
+//
+//  create or replace function increment_account_balance(
+//      p_account_id uuid, p_delta numeric, p_user_id uuid
+//  ) returns void language sql as $$
+//      update accounts set balance = balance + p_delta
+//      where id = p_account_id and user_id = p_user_id;
+//  $$;
+//
+//  create or replace function decrement_liability_amount(
+//      p_liability_id uuid, p_delta numeric, p_user_id uuid
+//  ) returns void language sql as $$
+//      update liabilities set amount = GREATEST(0, amount - p_delta)
+//      where id = p_liability_id and user_id = p_user_id;
+//  $$;
+//
+//  ── IMPORTANT: reconcile existing balances after deploying ─────────────
+//  Any account balance that was already corrupted by a lost update (like
+//  Cash showing -450 instead of 0) needs a one-time manual correction —
+//  this migration prevents FUTURE races, it doesn't retroactively fix past
+//  ones. Easiest way: open Accounts → edit the account → set the balance to
+//  what it should actually be, for each account you suspect was affected.
+// ──────────────────────────────────────────────────────────────────────────────
+
 // ─── TRANSACTION TYPE REDESIGN — MIGRATION (additive, run once) ──────────────
 //
 //  Adds two new first-class transaction types: 'cod_collection' and
@@ -306,13 +343,22 @@ function balanceDeltaForType(type, amount) {
 
 // Applies a signed balance delta to an account. Pass a negative delta to
 // reverse a previously-applied effect (used when editing/deleting).
+// Adjusts an account's balance ATOMICALLY at the database level (UPDATE ...
+// SET balance = balance + delta), via the increment_account_balance() SQL
+// function. This avoids a lost-update race condition: the previous
+// implementation read the balance, computed a new value in Node, then wrote
+// it back — two separate round trips. If two transactions on the SAME
+// account were created close together (exactly what happens when testing
+// several transaction types back-to-back), both requests could read the
+// same starting balance before either write landed, and whichever write
+// finished last would silently overwrite the other's effect. Doing the
+// arithmetic inside a single UPDATE statement in Postgres closes that gap.
 async function adjustAccountBalance(uid, accountId, delta) {
     if (!accountId || !delta) return;
-    const { data: accRows, error } = await supabase.from('accounts').select('balance').eq('id', accountId).eq('user_id', uid);
+    const { error } = await supabase.rpc('increment_account_balance', {
+        p_account_id: accountId, p_delta: delta, p_user_id: uid
+    });
     if (error) throw error;
-    if (!accRows?.length) return; // account no longer exists — nothing to adjust
-    const newBalance = (parseFloat(accRows[0].balance) || 0) + delta;
-    await supabase.from('accounts').update({ balance: newBalance }).eq('id', accountId).eq('user_id', uid);
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
@@ -580,17 +626,14 @@ app.post('/api/transfers', requireAuth, async (req, res) => {
 
         const amt = parseFloat(amount);
 
-        // Verify both accounts belong to this user and get current balances
+        // Verify both accounts belong to this user before transferring
         const { data: accounts, error: accErr } = await supabase
-            .from('accounts').select('id, balance')
+            .from('accounts').select('id')
             .in('id', [from_account_id, to_account_id])
             .eq('user_id', uid);
         if (accErr) throw accErr;
         if (!accounts || accounts.length !== 2)
             return res.status(404).json({ error: 'One or both accounts not found' });
-
-        const fromAcc = accounts.find(function(a){ return a.id === from_account_id; });
-        const toAcc   = accounts.find(function(a){ return a.id === to_account_id;   });
 
         // Record the transfer
         const { data: transfer, error: trErr } = await supabase.from('transfers')
@@ -598,11 +641,15 @@ app.post('/api/transfers', requireAuth, async (req, res) => {
             .select();
         if (trErr) throw trErr;
 
-        // Update account balances
-        await Promise.all([
-            supabase.from('accounts').update({ balance: parseFloat(fromAcc.balance) - amt }).eq('id', from_account_id).eq('user_id', uid),
-            supabase.from('accounts').update({ balance: parseFloat(toAcc.balance)   + amt }).eq('id', to_account_id).eq('user_id', uid)
+        // Update account balances atomically (see adjustAccountBalance for why
+        // this matters — avoids a lost-update race when other transactions on
+        // either account are being created around the same time).
+        const [fromRes, toRes] = await Promise.all([
+            supabase.rpc('increment_account_balance', { p_account_id: from_account_id, p_delta: -amt, p_user_id: uid }),
+            supabase.rpc('increment_account_balance', { p_account_id: to_account_id,   p_delta:  amt, p_user_id: uid })
         ]);
+        if (fromRes.error) throw fromRes.error;
+        if (toRes.error) throw toRes.error;
 
         res.status(201).json(transfer[0]);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1409,11 +1456,18 @@ app.post('/api/liabilities/:id/pay', requireAuth, async (req, res) => {
         }]).select();
         if (tErr) throw tErr;
 
-        const newBalance = Math.max(0, parseFloat(liab.amount) - amt);
-        await Promise.all([
-            supabase.from('liabilities').update({ amount: newBalance }).eq('id', id).eq('user_id', uid),
-            supabase.from('accounts').update({ balance: parseFloat(acc.balance) - amt }).eq('id', account_id).eq('user_id', uid)
+        // Atomic updates — see adjustAccountBalance's comment for why this
+        // matters (avoids a lost-update race if payments/transactions on the
+        // same account or liability land close together).
+        const [liabRes, accRes] = await Promise.all([
+            supabase.rpc('decrement_liability_amount', { p_liability_id: id, p_delta: amt, p_user_id: uid }),
+            supabase.rpc('increment_account_balance',  { p_account_id: account_id, p_delta: -amt, p_user_id: uid })
         ]);
+        if (liabRes.error) throw liabRes.error;
+        if (accRes.error) throw accRes.error;
+
+        const { data: freshLiab } = await supabase.from('liabilities').select('amount').eq('id', id).eq('user_id', uid).single();
+        const newBalance = freshLiab ? parseFloat(freshLiab.amount) : Math.max(0, parseFloat(liab.amount) - amt);
 
         res.status(201).json({ transaction: tx[0], newBalance });
     } catch (e) { res.status(500).json({ error: e.message }); }
